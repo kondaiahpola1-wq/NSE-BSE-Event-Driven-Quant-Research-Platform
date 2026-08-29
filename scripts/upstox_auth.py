@@ -174,6 +174,7 @@ def refresh_tokens(
             "client_secret": api_secret,
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
+            "redirect_uri": os.environ.get("UPSTOX_REDIRECT_URI", "https://api.upstox.com"),
         },
     )
     if resp.status_code != 200:

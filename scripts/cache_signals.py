@@ -22,13 +22,14 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 from indian_quant.config import load_settings
 from indian_quant.features.delivery import add_features, prepare_frame
+from indian_quant.ingestion.router import SourceRouter
 from indian_quant.web.prod_config import (
     REDIS_TTL,
     ensure_pg_schema,
@@ -37,12 +38,28 @@ from indian_quant.web.prod_config import (
 )
 
 
-def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str) -> dict | None:
-    """Compute technical signals from bars_1d OHLCV (no delivery z-score)."""
+def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str,
+                              router: SourceRouter | None = None) -> dict | None:
+    """Compute technical signals from bars_1d OHLCV (no delivery z-score).
+
+    Uses router to fetch fresh bars if the parquet is stale or missing.
+    """
     try:
         raw = pd.read_parquet(parquet_path)
         if raw.empty or len(raw) < 20:
-            return None
+            # Try to fetch fresh bars via router
+            if router is not None:
+                router_bars = router.get_bars_bse(
+                    symbol=symbol, timeframe="1d",
+                    from_date=datetime(2000, 1, 1).date(),
+                    to_date=datetime.now().date(),
+                )
+                if router_bars is not None and not router_bars.empty:
+                    raw = router_bars
+                else:
+                    return None
+            else:
+                return None
 
         # Normalize columns for add_features
         df = raw.copy()
@@ -140,7 +157,8 @@ def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str) -> 
         return None
 
 
-def compute_signal_for_stock(parquet_path: Path, symbol: str, exchange: str) -> dict | None:
+def compute_signal_for_stock(parquet_path: Path, symbol: str, exchange: str,
+                             router: SourceRouter | None = None) -> dict | None:
     try:
         raw = pd.read_parquet(parquet_path)
         if raw.empty or len(raw) < 20:
@@ -219,6 +237,40 @@ def compute_signal_for_stock(parquet_path: Path, symbol: str, exchange: str) -> 
         return None
 
 
+def enrich_with_corporate_actions(signals: list[dict], router: SourceRouter) -> list[dict]:
+    """Enrich signals with recent corporate actions (dividends, splits) via MCP/dalal.
+
+    Adds/adjusts fields in each signal dict.
+    """
+    if not signals or router is None:
+        return signals
+
+    enriched = []
+    for s in signals:
+        symbol = s["symbol"]
+        try:
+            # Try MCP corporate actions first
+            ca = router.get_corporate_actions(symbol=symbol, exchange=s["exchange"])
+            if ca is not None and isinstance(ca, dict):
+                # Extract key info from corporate actions payload
+                # Format depends on MCP response - store raw for now
+                s["corporate_action_raw"] = json.dumps(ca, default=str)[:200]
+            else:
+                # Fallback to dalal
+                try:
+                    import dalal
+                    ca = dalal.actions(symbol=symbol, exchange=s["exchange"])
+                    s["corporate_action_raw"] = str(ca)[:200] if ca else "none"
+                except Exception:
+                    s["corporate_action_raw"] = "dalal_failed"
+        except Exception:
+            s["corporate_action_raw"] = "mcp_failed"
+
+        enriched.append(s)
+
+    return enriched
+
+
 def write_to_postgres(signals: list[dict]) -> None:
     """Write all signals to PostgreSQL (full replace)."""
     import sqlalchemy as sa
@@ -281,13 +333,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Cache delivery signals")
     parser.add_argument("--warm-redis", action="store_true",
                         help="Only refresh Redis from PostgreSQL (fast)")
-    parser.parse_args()
+    args = parser.parse_args()
 
-    if warm_redis_from_pg.__code__.co_argcount == 0:
-        pass  # always available
-
-    args = sys.argv[1:]
-    if "--warm-redis" in args:
+    if "--warm-redis" in sys.argv:
         t0 = time.time()
         count = warm_redis_from_pg()
         print(json.dumps({"action": "warm_redis", "symbols": count, "time": f"{time.time()-t0:.1f}s"}))
@@ -299,32 +347,37 @@ def main() -> int:
 
     t0 = time.time()
     signals = []
+    router = SourceRouter()
 
     if nse_dir.exists():
         nse_files = sorted(nse_dir.glob("*.parquet"))
         print(f"Scanning {len(nse_files)} NSE parquets...", flush=True)
         for i, p in enumerate(nse_files):
-            sig = compute_signal_for_stock(p, p.stem, "NSE")
+            sig = compute_signal_for_stock(p, p.stem, "NSE", router=router)
             if sig:
                 signals.append(sig)
             if (i + 1) % 500 == 0:
                 print(f"  {i+1}/{len(nse_files)} scanned, {len(signals)} signals ({time.time()-t0:.0f}s)", flush=True)
         print(f"NSE done: {len(signals)} signals ({time.time()-t0:.0f}s)", flush=True)
 
-    # BSE: bars_1d now backfilled with 67 days via yfinance
+    # BSE: use router for Upstox V3 bars (26 years!) instead of stale yfinance
     if bse_dir.exists():
         bse_files = sorted(bse_dir.glob("*.parquet"))
         bse_ok = sum(1 for p in bse_files if len(pd.read_parquet(p)) >= 20)
         print(f"Scanning {len(bse_files)} BSE bars ({bse_ok} with 20+ bars)...", flush=True)
         bse_count = 0
         for i, p in enumerate(bse_files):
-            sig = compute_signal_from_bars(p, p.stem, "BSE")
+            # Use router to get Upstox V3 bars, then compute signals
+            sig = compute_signal_from_bars(p, p.stem, "BSE", router=router)
             if sig:
                 signals.append(sig)
                 bse_count += 1
             if (i + 1) % 500 == 0:
                 print(f"  BSE {i+1}/{len(bse_files)} scanned, {bse_count} signals ({time.time()-t0:.0f}s)", flush=True)
         print(f"BSE done: {bse_count} signals ({time.time()-t0:.0f}s)", flush=True)
+
+    # enrich MCP corporate actions
+    signals = enrich_with_corporate_actions(signals, router)
 
     elapsed_scan = time.time() - t0
 

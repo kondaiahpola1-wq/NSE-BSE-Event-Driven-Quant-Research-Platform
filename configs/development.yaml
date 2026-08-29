@@ -21,7 +21,7 @@ quality:
   fail_on_error: false
 
 upstox:
-  enabled: false
+  enabled: true
   sandbox: true
   api_key_env: UPSTOX_API_KEY
   access_token_env: UPSTOX_ACCESS_TOKEN
