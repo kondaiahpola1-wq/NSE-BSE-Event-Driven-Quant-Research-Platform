@@ -7,6 +7,7 @@ Environment variables (or defaults):
 
 from __future__ import annotations
 
+import contextlib
 import os
 from functools import lru_cache
 
@@ -33,9 +34,11 @@ def ensure_pg_schema():
     engine = get_pg_engine()
     meta = sa.MetaData()
     sa.Table(
-        "cached_signals", meta,
-        sa.Column("symbol", sa.String(32), primary_key=True),
+        "cached_signals",
+        meta,
+        sa.Column("symbol", sa.String(32), nullable=False),
         sa.Column("exchange", sa.String(8), nullable=False),
+        sa.PrimaryKeyConstraint("symbol", "exchange", name="cached_signals_pkey"),
         sa.Column("signal_date", sa.String(10)),
         sa.Column("segment", sa.String(8)),
         sa.Column("close", sa.Float),
@@ -66,13 +69,11 @@ def ensure_pg_schema():
     # Add columns to existing table if missing
     try:
         with engine.begin() as conn:
-            try:
-                conn.execute(sa.text("ALTER TABLE cached_signals ADD COLUMN market_cap_class VARCHAR(16)"))
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(Exception):
+                conn.execute(
+                    sa.text("ALTER TABLE cached_signals ADD COLUMN market_cap_class VARCHAR(16)")
+                )
+            with contextlib.suppress(Exception):
                 conn.execute(sa.text("ALTER TABLE cached_signals ADD COLUMN market_cap_cr FLOAT"))
-            except Exception:
-                pass
     except Exception:
         pass

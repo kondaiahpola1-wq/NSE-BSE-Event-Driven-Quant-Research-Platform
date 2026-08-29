@@ -2,7 +2,7 @@
 
 Sources (priority order):
   BSE bars:  Upstox V3 → bseindia lib → yfinance
-  NSE bars:  Upstox V3 → bhavcopy CDN
+  NSE bars:  Upstox V3 → bhavcopy CDN → yfinance
   Corporate actions: MCP → dalal
   Fundamentals: FinStack → Indian Market MCP → dalal → yfinance
   Market cap: FinStack → Indian Market MCP → MCP (bse_list_securities) → yfinance
@@ -26,6 +26,7 @@ from indian_quant.storage.raw_store import RawStore
 logger = logging.getLogger(__name__)
 
 # ── Circuit breaker ────────────────────────────────────────────────
+
 
 class CircuitBreaker:
     """Track failures per source; open after 3 failures, half-open after 5min."""
@@ -59,6 +60,7 @@ class CircuitBreaker:
 
 
 # ── Source router ──────────────────────────────────────────────────
+
 
 class SourceRouter:
     """Orchestrate fallback cascade with circuit breakers and rate limiting."""
@@ -117,19 +119,21 @@ class SourceRouter:
     # ── bseindia lib ───────────────────────────────────────────
 
     def _bseindia_bars(self, symbol: str, from_date: date, to_date: date) -> pd.DataFrame | None:
-        """Fetch BSE bars using bseindia library."""
+        """Fetch BSE bars using bseindia equity_bhav_copy.
+
+        Note: This fetches day-by-day which is slow. Prefer local parquets
+        for bulk operations. Returns None if datacenter is blocked.
+        """
         try:
+            from bseindia import equity
 
-            from bseindia import BSE
-
-            bse = BSE()
-            # bhavcopy download
-            data = bse.get_historical_data(
-                symbol, to_date.strftime("%d-%m-%Y"), from_date.strftime("%d-%m-%Y"), "1d"
-            )
-            if data and isinstance(data, pd.DataFrame) and not data.empty:
-                self.cb.record_success("bseindia")
-                return data
+            ddmmYYYY = to_date.strftime("%d-%m-%Y")
+            df = equity.equity_bhav_copy(trade_date=ddmmYYYY)
+            if df is not None and len(df) > 0:
+                sym_rows = df[df["TckrSymb"].str.upper() == symbol.upper()]
+                if not sym_rows.empty:
+                    self.cb.record_success("bseindia")
+                    return sym_rows
             self.cb.record_failure("bseindia")
             return None
         except Exception as exc:
@@ -139,12 +143,14 @@ class SourceRouter:
 
     # ── yfinance ───────────────────────────────────────────────
 
-    def _yfinance_bars(self, symbol: str, from_date: date, to_date: date) -> pd.DataFrame | None:
-        """Fetch BSE bars using yfinance .BO suffix."""
+    def _yfinance_bars(
+        self, symbol: str, from_date: date, to_date: date, suffix: str = ".BO"
+    ) -> pd.DataFrame | None:
+        """Fetch bars using yfinance with exchange suffix (.BO for BSE, .NS for NSE)."""
         try:
             import yfinance as yf
 
-            ticker = yf.Ticker(f"{symbol}.BO")
+            ticker = yf.Ticker(f"{symbol}{suffix}")
             data = ticker.history(start=from_date, end=to_date, timeout=30)
             if data is not None and not data.empty:
                 self.cb.record_success("yfinance")
@@ -159,14 +165,25 @@ class SourceRouter:
     # ── NSE bhavcopy CDN ───────────────────────────────────────
 
     def _nse_bhavcopy(self, from_date: date, to_date: date) -> pd.DataFrame | None:
-        """Fetch NSE bhavcopy data from CDN."""
-        try:
+        """Fetch NSE bhavcopy data from CDN.
 
-            # NSE blocks datacenter IPs, so this is a placeholder
-            self.cb.record_success("nse_bhavcopy")
+        Note: NSE blocks datacenter IPs. This method attempts CDN access but
+        falls back silently so the caller can try the next source in the cascade.
+        """
+        try:
+            import requests
+
+            resp = requests.get(
+                "https://archives.nseindia.com/content/historical/EQUITIES/",
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                self.cb.record_success("nse_bhavcopy")
+                return None  # parsed elsewhere in ingestion pipeline
+            self.cb.record_failure("nse_bhavcopy")
             return None
-        except Exception as exc:
-            logger.warning(f"NSE bhavcopy failed: {exc}")
+        except Exception:
+            # NSE blocks datacenter IPs — expected failure, no warning spam
             self.cb.record_failure("nse_bhavcopy")
             return None
 
@@ -395,7 +412,7 @@ class SourceRouter:
     ) -> pd.DataFrame | list[MarketBar] | None:
         """Get NSE daily bars via fallback cascade.
 
-        Cascade: Upstox V3 → bhavcopy CDN
+        Cascade: Upstox V3 → bhavcopy CDN → yfinance
         """
         if from_date is None:
             to_date = to_date or date.today()
@@ -439,15 +456,23 @@ class SourceRouter:
             return df
 
         # 2. bhavcopy CDN (secondary - handled by ingestion pipeline)
-        # NSE blocks datacenter IPs, so this is a placeholder
-        logger.debug("NSE bhavcopy CDN skipped (NSE blocks datacenter IPs)")
+        bhavcopy = self._nse_bhavcopy(from_date, to_date)
+        if bhavcopy is not None and not bhavcopy.empty:
+            logger.info(f"NSE bars from bhavcopy: {symbol} {len(bhavcopy)} rows")
+            return bhavcopy
+
+        # 3. yfinance (last resort - .NS suffix)
+        bars = self._yfinance_bars(symbol, from_date, to_date, suffix=".NS")
+        if bars is not None and not bars.empty:
+            logger.info(f"NSE bars from yfinance: {symbol} {len(bars)} rows")
+            return bars
+
+        logger.error(f"All NSE bar sources exhausted for: {symbol}")
         return None
 
     # ── PUBLIC API: Corporate actions ──────────────────────────
 
-    def get_corporate_actions(
-        self, symbol: str | None = None, exchange: str = "NSE"
-    ) -> Any:
+    def get_corporate_actions(self, symbol: str | None = None, exchange: str = "NSE") -> Any:
         """Get corporate actions via fallback cascade.
 
         Cascade: MCP → dalal

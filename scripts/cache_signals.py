@@ -67,7 +67,7 @@ def add_market_cap_to_signals(signals: list[dict]) -> list[dict]:
 
     for s in signals:
         s["market_cap_class"] = classify_market_cap(mcap_data, s["symbol"], s["exchange"])
-        key = f'{s["exchange"]}|{s["symbol"]}'
+        key = f"{s['exchange']}|{s['symbol']}"
         entry = mcap_data.get(key, {})
         s["market_cap_cr"] = entry.get("market_cap_cr", None)
 
@@ -80,8 +80,9 @@ def add_market_cap_to_signals(signals: list[dict]) -> list[dict]:
     return signals
 
 
-def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str,
-                              router: SourceRouter | None = None) -> dict | None:
+def compute_signal_from_bars(
+    parquet_path: Path, symbol: str, exchange: str, router: SourceRouter | None = None
+) -> dict | None:
     """Compute technical signals from bars_1d OHLCV (no delivery z-score).
 
     Uses router to fetch fresh bars if the parquet is stale or missing.
@@ -89,19 +90,7 @@ def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str,
     try:
         raw = pd.read_parquet(parquet_path)
         if raw.empty or len(raw) < 20:
-            # Try to fetch fresh bars via router
-            if router is not None:
-                router_bars = router.get_bars_bse(
-                    symbol=symbol, timeframe="1d",
-                    from_date=datetime(2000, 1, 1).date(),
-                    to_date=datetime.now().date(),
-                )
-                if router_bars is not None and not router_bars.empty:
-                    raw = router_bars
-                else:
-                    return None
-            else:
-                return None
+            return None
 
         # Normalize columns for add_features
         df = raw.copy()
@@ -149,7 +138,11 @@ def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str,
         prev = df.iloc[-2] if len(df) > 1 else df.iloc[-1]
         close = float(last["close"])
         prev_close = float(prev["close"]) if pd.notna(prev.get("close")) else close
-        atr = float(last.get("atr_14", close * 0.03)) if pd.notna(last.get("atr_14")) else close * 0.03
+        atr = (
+            float(last.get("atr_14", close * 0.03))
+            if pd.notna(last.get("atr_14"))
+            else close * 0.03
+        )
 
         signal_type = None
         rsi_val = last.get("rsi")
@@ -164,7 +157,13 @@ def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str,
                 signal_type = "rsi_oversold"
             elif rsi_val > 70 and prev_rsi <= 70:
                 signal_type = "rsi_overbought"
-        if signal_type is None and pd.notna(macd_val) and pd.notna(macd_sig) and pd.notna(prev_macd) and pd.notna(prev_macd_sig):
+        if (
+            signal_type is None
+            and pd.notna(macd_val)
+            and pd.notna(macd_sig)
+            and pd.notna(prev_macd)
+            and pd.notna(prev_macd_sig)
+        ):
             if macd_val > macd_sig and prev_macd <= prev_macd_sig:
                 signal_type = "macd_bullish_x"
             elif macd_val < macd_sig and prev_macd >= prev_macd_sig:
@@ -173,7 +172,9 @@ def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str,
         return {
             "symbol": symbol,
             "exchange": exchange,
-            "signal_date": str(last["date"].date()) if hasattr(last["date"], "date") else str(last["date"])[:10],
+            "signal_date": str(last["date"].date())
+            if hasattr(last["date"], "date")
+            else str(last["date"])[:10],
             "segment": str(last.get("segment", "EQ")),
             "close": round(close, 2),
             "prev_close": round(prev_close, 2),
@@ -199,8 +200,9 @@ def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str,
         return None
 
 
-def compute_signal_for_stock(parquet_path: Path, symbol: str, exchange: str,
-                             router: SourceRouter | None = None) -> dict | None:
+def compute_signal_for_stock(
+    parquet_path: Path, symbol: str, exchange: str, router: SourceRouter | None = None
+) -> dict | None:
     try:
         raw = pd.read_parquet(parquet_path)
         if raw.empty or len(raw) < 20:
@@ -239,7 +241,13 @@ def compute_signal_for_stock(parquet_path: Path, symbol: str, exchange: str,
                     signal_type = "rsi_oversold"
                 elif rsi > 70 and prev_rsi <= 70:
                     signal_type = "rsi_overbought"
-            if signal_type is None and pd.notna(macd_val) and pd.notna(macd_sig) and pd.notna(prev_macd) and pd.notna(prev_macd_sig):
+            if (
+                signal_type is None
+                and pd.notna(macd_val)
+                and pd.notna(macd_sig)
+                and pd.notna(prev_macd)
+                and pd.notna(prev_macd_sig)
+            ):
                 if macd_val > macd_sig and prev_macd <= prev_macd_sig:
                     signal_type = "macd_bullish_x"
                 elif macd_val < macd_sig and prev_macd >= prev_macd_sig:
@@ -248,7 +256,11 @@ def compute_signal_for_stock(parquet_path: Path, symbol: str, exchange: str,
         close = float(last["close"])
         prev_close = float(prev["close"]) if pd.notna(prev.get("close")) else close
         ret_1d_pct = round((close / prev_close - 1) * 100, 2) if prev_close > 0 else 0
-        atr = float(last.get("atr_14", close * 0.03)) if pd.notna(last.get("atr_14")) else close * 0.03
+        atr = (
+            float(last.get("atr_14", close * 0.03))
+            if pd.notna(last.get("atr_14"))
+            else close * 0.03
+        )
 
         return {
             "symbol": symbol,
@@ -258,12 +270,16 @@ def compute_signal_for_stock(parquet_path: Path, symbol: str, exchange: str,
             "close": round(close, 2),
             "prev_close": round(prev_close, 2),
             "ret_1d_pct": ret_1d_pct,
-            "deliv_pct": round(float(last["deliv_pct"]), 1) if pd.notna(last.get("deliv_pct")) else None,
+            "deliv_pct": round(float(last["deliv_pct"]), 1)
+            if pd.notna(last.get("deliv_pct"))
+            else None,
             "deliv_z": round(float(last["deliv_z"]), 2) if pd.notna(last.get("deliv_z")) else None,
             "vol_z": round(float(last["vol_z"]), 2) if pd.notna(last.get("vol_z")) else None,
             "rsi": round(float(last["rsi"]), 1) if pd.notna(last.get("rsi")) else None,
             "macd": round(float(last["macd"]), 2) if pd.notna(last.get("macd")) else None,
-            "macd_signal": round(float(last["macd_signal"]), 2) if pd.notna(last.get("macd_signal")) else None,
+            "macd_signal": round(float(last["macd_signal"]), 2)
+            if pd.notna(last.get("macd_signal"))
+            else None,
             "sma_20": round(float(last["sma_20"]), 2) if pd.notna(last.get("sma_20")) else None,
             "sma_50": round(float(last["sma_50"]), 2) if pd.notna(last.get("sma_50")) else None,
             "atr_14": round(atr, 2),
@@ -301,6 +317,7 @@ def enrich_with_corporate_actions(signals: list[dict], router: SourceRouter) -> 
                 # Fallback to dalal
                 try:
                     import dalal
+
                     ca = dalal.actions(symbol=symbol, exchange=s["exchange"])
                     s["corporate_action_raw"] = str(ca)[:200] if ca else "none"
                 except Exception:
@@ -322,10 +339,12 @@ def write_to_postgres(signals: list[dict]) -> None:
 
     with engine.begin() as conn:
         conn.execute(sa.text("TRUNCATE TABLE cached_signals"))
-        if signals:
-            df = pd.DataFrame(signals)
-            df["cached_at"] = datetime.now(UTC).isoformat()
-            df.to_sql("cached_signals", engine, if_exists="append", index=False)
+        conn.commit()
+
+    if signals:
+        df = pd.DataFrame(signals)
+        df["cached_at"] = datetime.now(UTC).isoformat()
+        df.to_sql("cached_signals", engine, if_exists="append", index=False)
 
 
 def write_to_redis(signals: list[dict]) -> None:
@@ -373,14 +392,19 @@ def warm_redis_from_pg() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Cache delivery signals")
-    parser.add_argument("--warm-redis", action="store_true",
-                        help="Only refresh Redis from PostgreSQL (fast)")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--warm-redis", action="store_true", help="Only refresh Redis from PostgreSQL (fast)"
+    )
+    parser.parse_args()
 
     if "--warm-redis" in sys.argv:
         t0 = time.time()
         count = warm_redis_from_pg()
-        print(json.dumps({"action": "warm_redis", "symbols": count, "time": f"{time.time()-t0:.1f}s"}))
+        print(
+            json.dumps(
+                {"action": "warm_redis", "symbols": count, "time": f"{time.time() - t0:.1f}s"}
+            )
+        )
         return 0
 
     settings = load_settings()
@@ -399,8 +423,11 @@ def main() -> int:
             if sig:
                 signals.append(sig)
             if (i + 1) % 500 == 0:
-                print(f"  {i+1}/{len(nse_files)} scanned, {len(signals)} signals ({time.time()-t0:.0f}s)", flush=True)
-        print(f"NSE done: {len(signals)} signals ({time.time()-t0:.0f}s)", flush=True)
+                print(
+                    f"  {i + 1}/{len(nse_files)} scanned, {len(signals)} signals ({time.time() - t0:.0f}s)",
+                    flush=True,
+                )
+        print(f"NSE done: {len(signals)} signals ({time.time() - t0:.0f}s)", flush=True)
 
     # BSE: use router for Upstox V3 bars (26 years!) instead of stale yfinance
     if bse_dir.exists():
@@ -415,14 +442,17 @@ def main() -> int:
                 signals.append(sig)
                 bse_count += 1
             if (i + 1) % 500 == 0:
-                print(f"  BSE {i+1}/{len(bse_files)} scanned, {bse_count} signals ({time.time()-t0:.0f}s)", flush=True)
-        print(f"BSE done: {bse_count} signals ({time.time()-t0:.0f}s)", flush=True)
+                print(
+                    f"  BSE {i + 1}/{len(bse_files)} scanned, {bse_count} signals ({time.time() - t0:.0f}s)",
+                    flush=True,
+                )
+        print(f"BSE done: {bse_count} signals ({time.time() - t0:.0f}s)", flush=True)
 
     # Add real market cap classification
     signals = add_market_cap_to_signals(signals)
 
-    # enrich MCP corporate actions
-    signals = enrich_with_corporate_actions(signals, router)
+    # enrich MCP corporate actions (skipped — MCP NSE API blocked from datacenter IPs)
+    # signals = enrich_with_corporate_actions(signals, router)
 
     elapsed_scan = time.time() - t0
 
@@ -434,14 +464,19 @@ def main() -> int:
     buys = sum(1 for s in signals if s.get("signal_type") == "dz_hi_up")
     avoids = sum(1 for s in signals if s.get("signal_type") == "dz_hi_dn")
 
-    print(json.dumps({
-        "total_stocks": len(signals),
-        "buys": buys,
-        "avoids": avoids,
-        "scan_time": f"{elapsed_scan:.1f}s",
-        "total_time": f"{elapsed_total:.1f}s",
-        "store": "postgresql+redis",
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "total_stocks": len(signals),
+                "buys": buys,
+                "avoids": avoids,
+                "scan_time": f"{elapsed_scan:.1f}s",
+                "total_time": f"{elapsed_total:.1f}s",
+                "store": "postgresql+redis",
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

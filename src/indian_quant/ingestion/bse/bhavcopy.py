@@ -37,6 +37,7 @@ from indian_quant.schemas import (
 class SourceBlockedError(RuntimeError):
     """Raised when an upstream serves an anti-bot page instead of data."""
 
+
 # BSE series -> canonical segment mapping
 SERIES_SEGMENT: dict[str, Segment] = {
     "B": Segment.EQ,
@@ -106,7 +107,11 @@ class BseBhavcopyIngester:
                 continue
             if o <= 0 and h <= 0 and low <= 0 and c <= 0:
                 continue
-            ts = datetime.fromisoformat(str(row.get("TradDt") or day.isoformat())).replace(tzinfo=UTC)
+            h = max(h, o, c)
+            low = min(low, o, c) if low > 0 else min(o, c)
+            ts = datetime.fromisoformat(str(row.get("TradDt") or day.isoformat())).replace(
+                tzinfo=UTC
+            )
             bars.append(
                 MarketBar(
                     instrument_id=make_instrument_id(Exchange.BSE, segment, symbol),
