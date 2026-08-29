@@ -22,6 +22,9 @@ dependencies = [
     "jinja2>=3.1",
     "bcrypt>=4.0",
     "itsdangerous>=2.2",
+    "finstack-mcp>=0.10.0",
+    "mcp<2",
+    "indian-market-mcp>=0.1.0",
 ]
 
 [project.optional-dependencies]

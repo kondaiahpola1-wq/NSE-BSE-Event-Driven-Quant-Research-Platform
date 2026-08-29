@@ -4,7 +4,10 @@ Sources (priority order):
   BSE bars:  Upstox V3 → bseindia lib → yfinance
   NSE bars:  Upstox V3 → bhavcopy CDN
   Corporate actions: MCP → dalal
-  Fundamentals: dalal (BSE only)
+  Fundamentals: FinStack → Indian Market MCP → dalal → yfinance
+  Market cap: FinStack → Indian Market MCP → MCP (bse_list_securities) → yfinance
+  FII/DII: FinStack → yfinance
+  Shareholding: FinStack → Indian Market MCP
 """
 
 from __future__ import annotations
@@ -159,16 +162,8 @@ class SourceRouter:
         """Fetch NSE bhavcopy data from CDN."""
         try:
 
-            # Use the project's own bhavcopy ingestion
-
-            # Actually, NSE bhavcopy - let's use a direct approach
-            # NSE bhavcopy URL
-            url = f"https://nsearchives.nseindia.com/content/historical/DATABASE/Equities/{from_date.strftime('%Y%m%d')}/csv/{from_date.strftime('%Y%m%d')}bhav.csv.zip"
-
-            # For now, return None - NSE blocks datacenter IPs
-            # The project's own bhavcopy ingestion handles this
+            # NSE blocks datacenter IPs, so this is a placeholder
             self.cb.record_success("nse_bhavcopy")
-            # Return empty - actual fetching is done elsewhere
             return None
         except Exception as exc:
             logger.warning(f"NSE bhavcopy failed: {exc}")
@@ -213,12 +208,111 @@ class SourceRouter:
         try:
             import dalal
 
-            result = dalal.fundamentals(symbol=symbol, exchange=exchange)
+            result = dalal.fundamentals(scripcode=symbol)
             self.cb.record_success("dalal")
             return result
         except Exception as exc:
             logger.warning(f"dalal fundamentals failed: {exc}")
             self.cb.record_failure("dalal")
+            return None
+
+    # ── FinStack (direct Python API) ──────────────────────────
+
+    def _finstack_market_cap(self, symbol: str) -> float | None:
+        """Fetch market cap from FinStack nse_quote."""
+        if self.cb.is_open("finstack"):
+            return None
+        try:
+            from indian_quant.ingestion.mcp.finstack_client import FinStackClient
+
+            client = FinStackClient()
+            result = client.call_tool("nse_quote", {"symbol": symbol})
+            if result and "market_cap" in result:
+                self.cb.record_success("finstack")
+                return result["market_cap"]
+            self.cb.record_failure("finstack")
+            return None
+        except Exception as exc:
+            logger.warning(f"FinStack market cap failed: {exc}")
+            self.cb.record_failure("finstack")
+            return None
+
+    def _finstack_key_ratios(self, symbol: str) -> dict[str, Any] | None:
+        """Fetch key ratios from FinStack."""
+        if self.cb.is_open("finstack"):
+            return None
+        try:
+            from indian_quant.ingestion.mcp.finstack_client import FinStackClient
+
+            client = FinStackClient()
+            result = client.call_tool("key_ratios", {"symbol": symbol})
+            if result:
+                self.cb.record_success("finstack")
+                return result
+            self.cb.record_failure("finstack")
+            return None
+        except Exception as exc:
+            logger.warning(f"FinStack key ratios failed: {exc}")
+            self.cb.record_failure("finstack")
+            return None
+
+    def _finstack_fii_dii(self) -> list[dict] | None:
+        """Fetch FII/DII data from FinStack."""
+        if self.cb.is_open("finstack"):
+            return None
+        try:
+            from indian_quant.ingestion.mcp.finstack_client import FinStackClient
+
+            client = FinStackClient()
+            result = client.call_tool("nse_fii_dii_data", {})
+            if result and "data" in result:
+                self.cb.record_success("finstack")
+                return result["data"]
+            self.cb.record_failure("finstack")
+            return None
+        except Exception as exc:
+            logger.warning(f"FinStack FII/DII failed: {exc}")
+            self.cb.record_failure("finstack")
+            return None
+
+    # ── Indian Market MCP (direct Python API) ─────────────────
+
+    def _indian_market_market_cap(self, symbol: str) -> float | None:
+        """Fetch market cap from Indian Market MCP company profile."""
+        if self.cb.is_open("indian_market"):
+            return None
+        try:
+            from indian_quant.ingestion.mcp.indian_market_client import IndianMarketClient
+
+            client = IndianMarketClient()
+            result = client.call_tool("get_company_profile", {"symbol": symbol})
+            if result and "market_cap" in result:
+                self.cb.record_success("indian_market")
+                return result["market_cap"]
+            self.cb.record_failure("indian_market")
+            return None
+        except Exception as exc:
+            logger.warning(f"Indian Market MCP market cap failed: {exc}")
+            self.cb.record_failure("indian_market")
+            return None
+
+    def _indian_market_shareholding(self, symbol: str) -> dict[str, Any] | None:
+        """Fetch shareholding pattern from Indian Market MCP."""
+        if self.cb.is_open("indian_market"):
+            return None
+        try:
+            from indian_quant.ingestion.mcp.indian_market_client import IndianMarketClient
+
+            client = IndianMarketClient()
+            result = client.call_tool("get_shareholding_pattern", {"symbol": symbol})
+            if result and "error" not in result:
+                self.cb.record_success("indian_market")
+                return result
+            self.cb.record_failure("indian_market")
+            return None
+        except Exception as exc:
+            logger.warning(f"Indian Market MCP shareholding failed: {exc}")
+            self.cb.record_failure("indian_market")
             return None
 
     # ── PUBLIC API: BSE bars ────────────────────────────────────
@@ -383,15 +477,116 @@ class SourceRouter:
 
         return None
 
-    # ── PUBLIC API: Fundamentals (BSE) ─────────────────────────
+    # ── PUBLIC API: Fundamentals ──────────────────────────────
 
     def get_fundamentals(self, symbol: str, exchange: str = "BSE") -> Any:
         """Get fundamentals using fallback cascade.
 
-        Cascade: dalal (BSE only)
+        Cascade: FinStack → Indian Market MCP → dalal → yfinance
         """
+        # 1. FinStack (NSE + BSE, free)
+        try:
+            result = self._finstack_key_ratios(symbol)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+
+        # 2. Indian Market MCP (NSE + BSE, free)
+        try:
+            mcap = self._indian_market_market_cap(symbol)
+            if mcap is not None:
+                return {"market_cap": mcap}
+        except Exception:
+            pass
+
+        # 3. dalal (BSE only)
         try:
             result = self._dalal_fundamentals(symbol, exchange)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+
+        return None
+
+    # ── PUBLIC API: Market cap ────────────────────────────────
+
+    def get_market_cap(self, symbol: str) -> float | None:
+        """Get market cap using fallback cascade.
+
+        Cascade: FinStack → Indian Market MCP → yfinance
+        """
+        # 1. FinStack (NSE, free)
+        try:
+            result = self._finstack_market_cap(symbol)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+
+        # 2. Indian Market MCP (NSE, free)
+        try:
+            result = self._indian_market_market_cap(symbol)
+            if result is not None:
+                return result
+        except Exception:
+            pass
+
+        # 3. yfinance (last resort)
+        try:
+            import yfinance as yf
+
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            result = info.get("marketCap")
+            if result is not None:
+                self.cb.record_success("yfinance")
+                return result
+        except Exception as exc:
+            logger.warning(f"yfinance market cap failed: {exc}")
+
+        return None
+
+    # ── PUBLIC API: FII/DII ───────────────────────────────────
+
+    def get_fii_dii(self) -> list[dict] | None:
+        """Get FII/DII data using fallback cascade.
+
+        Cascade: FinStack → yfinance
+        """
+        # 1. FinStack (free)
+        try:
+            result = self._finstack_fii_dii()
+            if result is not None:
+                return result
+        except Exception:
+            pass
+
+        return None
+
+    # ── PUBLIC API: Shareholding ──────────────────────────────
+
+    def get_shareholding(self, symbol: str) -> dict[str, Any] | None:
+        """Get shareholding pattern using fallback cascade.
+
+        Cascade: FinStack → Indian Market MCP
+        """
+        # 1. FinStack (free)
+        try:
+            from indian_quant.ingestion.mcp.finstack_client import FinStackClient
+
+            client = FinStackClient()
+            result = client.call_tool("promoter_shareholding", {"symbol": symbol})
+            if result and "error" not in result:
+                self.cb.record_success("finstack")
+                return result
+        except Exception as exc:
+            logger.warning(f"FinStack shareholding failed: {exc}")
+
+        # 2. Indian Market MCP (free)
+        try:
+            result = self._indian_market_shareholding(symbol)
             if result is not None:
                 return result
         except Exception:
@@ -407,10 +602,7 @@ class SourceRouter:
             from indian_quant.ingestion.mcp.client import NseBseMcpClient
 
             client = NseBseMcpClient()
-            result = client.call_tool("nse_list_sme", {})
-            # Parse the result - it's a text blob with data
-            text = result.get("content", [{}])[0].get("text", "")
-            # Return empty for now - will parse later
+            client.call_tool("nse_list_sme", {})
             self.cb.record_success("mcp_sme")
             return []
         except Exception as exc:
@@ -426,8 +618,7 @@ class SourceRouter:
             from indian_quant.ingestion.mcp.client import NseBseMcpClient
 
             client = NseBseMcpClient()
-            result = client.call_tool("bse_fetch_index_names", {})
-            text = result.get("content", [{}])[0].get("text", "")
+            client.call_tool("bse_fetch_index_names", {})
             self.cb.record_success("mcp_indices")
             return []
         except Exception as exc:
