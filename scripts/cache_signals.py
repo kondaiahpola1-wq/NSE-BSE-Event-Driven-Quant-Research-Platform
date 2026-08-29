@@ -38,6 +38,48 @@ from indian_quant.web.prod_config import (
 )
 
 
+def load_market_cap() -> dict[str, dict]:
+    """Load real market cap data from data/universe/market_cap.json."""
+    mcap_file = Path("data/universe/market_cap.json")
+    if mcap_file.exists():
+        try:
+            return json.loads(mcap_file.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def classify_market_cap(mcap_data: dict, symbol: str, exchange: str) -> str:
+    """Classify market cap from real data. Fallback to 'Unknown' if not found."""
+    key = f"{exchange}|{symbol}"
+    entry = mcap_data.get(key)
+    if entry:
+        return entry.get("market_cap_class", "Unknown")
+    return "Unknown"
+
+
+def add_market_cap_to_signals(signals: list[dict]) -> list[dict]:
+    """Add real market cap classification to each signal."""
+    mcap_data = load_market_cap()
+    if not mcap_data:
+        print("Warning: No market cap data found, skipping classification")
+        return signals
+
+    for s in signals:
+        s["market_cap_class"] = classify_market_cap(mcap_data, s["symbol"], s["exchange"])
+        key = f'{s["exchange"]}|{s["symbol"]}'
+        entry = mcap_data.get(key, {})
+        s["market_cap_cr"] = entry.get("market_cap_cr", None)
+
+    # Summary
+    classes = {}
+    for s in signals:
+        cls = s.get("market_cap_class", "Unknown")
+        classes[cls] = classes.get(cls, 0) + 1
+    print(f"Market cap classification: {classes}")
+    return signals
+
+
 def compute_signal_from_bars(parquet_path: Path, symbol: str, exchange: str,
                               router: SourceRouter | None = None) -> dict | None:
     """Compute technical signals from bars_1d OHLCV (no delivery z-score).
@@ -375,6 +417,9 @@ def main() -> int:
             if (i + 1) % 500 == 0:
                 print(f"  BSE {i+1}/{len(bse_files)} scanned, {bse_count} signals ({time.time()-t0:.0f}s)", flush=True)
         print(f"BSE done: {bse_count} signals ({time.time()-t0:.0f}s)", flush=True)
+
+    # Add real market cap classification
+    signals = add_market_cap_to_signals(signals)
 
     # enrich MCP corporate actions
     signals = enrich_with_corporate_actions(signals, router)

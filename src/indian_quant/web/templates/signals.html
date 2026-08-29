@@ -6,21 +6,81 @@
 {% if signals.date %}
 <div class="sub" style="color:var(--faint);margin-bottom:16px">Data through {{ signals.date }} · {{ signals.total_scanned }} symbols scanned</div>
 
+<div class="section-title">Signals by Market Cap</div>
+<div class="grid grid-4">
+  <div class="card">
+    <div class="label">Large Cap</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Large Cap")|list|length if signals.all else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Mid Cap</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Mid Cap")|list|length if signals.all else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Small Cap</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Small Cap")|list|length if signals.all else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Micro Cap</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Micro Cap")|list|length if signals.all else 0 }}</div>
+  </div>
+</div>
+
 <h2>🟢 Accumulation Candidates (dz_hi_up)</h2>
 {% if signals.buys %}
-<table><tr><th>#</th><th>Symbol</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return</th></tr>
+<table><tr><th>#</th><th>Symbol</th><th>Market Cap</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return</th></tr>
 {% for s in signals.buys %}
-<tr><td>{{ loop.index }}</td><td class="mono good"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--green);text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.segment }}</td><td class="mono">₹{{ s.close }}</td><td class="mono">{{ s.deliv_pct }}%</td><td class="mono">{{ s.deliv_z }}</td><td>{% if s.ret_1d_pct > 0 %}+{% endif %}{{ s.ret_1d_pct }}%</td></tr>
+<tr><td>{{ loop.index }}</td><td class="mono good"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--green);text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.market_cap_class or '—' }}</td><td>{{ s.segment }}</td><td class="mono">₹{{ s.close }}</td><td class="mono">{{ s.deliv_pct }}%</td><td class="mono">{{ s.deliv_z }}</td><td>{% if s.ret_1d_pct > 0 %}+{% endif %}{{ s.ret_1d_pct }}%</td></tr>
 {% endfor %}</table>
 {% else %}<div class="empty">No accumulation signals today</div>{% endif %}
 
 {% if signals.avoids %}
 <h2>🔴 Distribution / Avoid</h2>
-<table><tr><th>Symbol</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return</th></tr>
+<table><tr><th>Symbol</th><th>Market Cap</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return</th></tr>
 {% for s in signals.avoids %}
-<tr><td class="mono bad"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--red);text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.segment }}</td><td class="mono">₹{{ s.close }}</td><td class="mono">{{ s.deliv_pct }}%</td><td class="mono warn">{{ s.deliv_z }}</td><td>{{ s.ret_1d_pct }}%</td></tr>
+<tr><td class="mono bad"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--red);text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.market_cap_class or '—' }}</td><td>{{ s.segment }}</td><td class="mono">₹{{ s.close }}</td><td class="mono">{{ s.deliv_pct }}%</td><td class="mono warn">{{ s.deliv_z }}</td><td>{{ s.ret_1d_pct }}%</td></tr>
 {% endfor %}</table>
 {% endif %}
+
+<div class="section-title">Large Cap Signals</div>
+{% set filtered = signals.all|selectattr("market_cap_class", "equalto", "Large Cap")|list %}
+{% if filtered %}
+<h2>Large Cap ({{ filtered|length }})</h2>
+<table style="font-size:11px"><tr><th>Symbol</th><th>Type</th><th>Close</th><th>Z-Score</th><th>RSI</th></tr>
+{% for s in filtered[:10] %}
+<tr><td class="mono"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type or '—' }}</td><td>₹{{ s.close }}</td><td>{{ s.deliv_z or '—' }}</td><td>{{ s.rsi or '—' }}</td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">No Large Cap signals</div>{% endif %}
+
+<div class="section-title">Mid Cap Signals</div>
+{% set filtered = signals.all|selectattr("market_cap_class", "equalto", "Mid Cap")|list %}
+{% if filtered %}
+<h2>Mid Cap ({{ filtered|length }})</h2>
+<table style="font-size:11px"><tr><th>Symbol</th><th>Type</th><th>Close</th><th>Z-Score</th><th>RSI</th></tr>
+{% for s in filtered[:10] %}
+<tr><td class="mono"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type or '—' }}</td><td>₹{{ s.close }}</td><td>{{ s.deliv_z or '—' }}</td><td>{{ s.rsi or '—' }}</td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">No Mid Cap signals</div>{% endif %}
+
+<div class="section-title">Small Cap Signals</div>
+{% set filtered = signals.all|selectattr("market_cap_class", "equalto", "Small Cap")|list %}
+{% if filtered %}
+<h2>Small Cap ({{ filtered|length }})</h2>
+<table style="font-size:11px"><tr><th>Symbol</th><th>Type</th><th>Close</th><th>Z-Score</th><th>RSI</th></tr>
+{% for s in filtered[:10] %}
+<tr><td class="mono"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type or '—' }}</td><td>₹{{ s.close }}</td><td>{{ s.deliv_z or '—' }}</td><td>{{ s.rsi or '—' }}</td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">No Small Cap signals</div>{% endif %}
+
+<div class="section-title">Micro Cap Signals</div>
+{% set filtered = signals.all|selectattr("market_cap_class", "equalto", "Micro Cap")|list %}
+{% if filtered %}
+<h2>Micro Cap ({{ filtered|length }})</h2>
+<table style="font-size:11px"><tr><th>Symbol</th><th>Type</th><th>Close</th><th>Z-Score</th><th>RSI</th></tr>
+{% for s in filtered[:10] %}
+<tr><td class="mono"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type or '—' }}</td><td>₹{{ s.close }}</td><td>{{ s.deliv_z or '—' }}</td><td>{{ s.rsi or '—' }}</td></tr>
+{% endfor %}</table>
+{% else %}<div class="empty">No Micro Cap signals</div>{% endif %}
 
 <p style="margin-top:20px;color:var(--faint);font-size:12px">
   Entry via limit orders. Hold ~3-10 days. Stop at 7%. Re-check after 18:30 IST for fresh data.

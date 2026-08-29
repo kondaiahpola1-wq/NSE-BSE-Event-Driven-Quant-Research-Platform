@@ -10,7 +10,83 @@
   <div class="card"><div class="label">Realized</div><div class="value good">{{ summary.realized }}</div></div>
   <div class="card"><div class="label">Avg Net BPS</div><div class="value {% if summary.avg_realized_net_bps and summary.avg_realized_net_bps > 0 %}good{% elif summary.avg_realized_net_bps and summary.avg_realized_net_bps < 0 %}bad{% else %}neutral{% endif %}">
     {{ summary.avg_realized_net_bps if summary.avg_realized_net_bps is not none else '—' }}</div></div>
-  <div class="card"><div class="label">Directional Accuracy</div><div class="value">{{ (summary.directional_accuracy * 100)|round(1) if summary.directional_accuracy else '—' }}%</div></div>
+  <div class="card"><div class="label">Directional Accuracy</div><div class="value">{{ (summary.directional_accuracy * 100)|round(1) if summary.directional_accuracy else '—' }}%
+<div class="section-title">Signals by Market Cap</div>
+<div class="grid grid-4">
+  <div class="card">
+    <div class="label">Large Cap</div>
+    <div class="value">{{ signals|selectattr("market_cap_class", "equalto", "Large Cap")|list|count if signals else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Mid Cap</div>
+    <div class="value">{{ signals|selectattr("market_cap_class", "equalto", "Mid Cap")|list|count if signals else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Small Cap</div>
+    <div class="value">{{ signals|selectattr("market_cap_class", "equalto", "Small Cap")|list|count if signals else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Micro Cap</div>
+    <div class="value">{{ signals|selectattr("market_cap_class", "equalto", "Micro Cap")|list|count if signals else 0 }}</div>
+  </div>
+</div>
+
+<div class="section-title">Large Cap Signals</div>
+{% set filtered = signals|selectattr("market_cap_class", "equalto", "Large Cap")|list %}
+{% if filtered %}
+<h2>Large Cap Signals ({{ filtered|length }})</h2>
+<table style="font-size:11px">
+  <tr><th>Symbol</th><th>Type</th><th>Z-Score</th><th>Hit</th></tr>
+  {% for s in filtered[:8] %}
+  <tr><td class="mono {% if s.hit %}good{% else %}bad{% endif %}"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type }}</td><td>{{ '%.2f'|format(s.deliv_z) if s.deliv_z else '—' }}</td><td>{% if s.hit %}✅{% else %}❌{% endif %}</td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty">No Large Cap signals yet</div>
+{% endif %}
+
+<div class="section-title">Mid Cap Signals</div>
+{% set filtered = signals|selectattr("market_cap_class", "equalto", "Mid Cap")|list %}
+{% if filtered %}
+<h2>Mid Cap Signals ({{ filtered|length }})</h2>
+<table style="font-size:11px">
+  <tr><th>Symbol</th><th>Type</th><th>Z-Score</th><th>Hit</th></tr>
+  {% for s in filtered[:8] %}
+  <tr><td class="mono {% if s.hit %}good{% else %}bad{% endif %}"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type }}</td><td>{{ '%.2f'|format(s.deliv_z) if s.deliv_z else '—' }}</td><td>{% if s.hit %}✅{% else %}❌{% endif %}</td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty">No Mid Cap signals yet</div>
+{% endif %}
+
+<div class="section-title">Small Cap Signals</div>
+{% set filtered = signals|selectattr("market_cap_class", "equalto", "Small Cap")|list %}
+{% if filtered %}
+<h2>Small Cap Signals ({{ filtered|length }})</h2>
+<table style="font-size:11px">
+  <tr><th>Symbol</th><th>Type</th><th>Z-Score</th><th>Hit</th></tr>
+  {% for s in filtered[:8] %}
+  <tr><td class="mono {% if s.hit %}good{% else %}bad{% endif %}"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type }}</td><td>{{ '%.2f'|format(s.deliv_z) if s.deliv_z else '—' }}</td><td>{% if s.hit %}✅{% else %}❌{% endif %}</td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty">No Small Cap signals yet</div>
+{% endif %}
+
+<div class="section-title">Micro Cap Signals</div>
+{% set filtered = signals|selectattr("market_cap_class", "equalto", "Micro Cap")|list %}
+{% if filtered %}
+<h2>Micro Cap Signals ({{ filtered|length }})</h2>
+<table style="font-size:11px">
+  <tr><th>Symbol</th><th>Type</th><th>Z-Score</th><th>Hit</th></tr>
+  {% for s in filtered[:8] %}
+  <tr><td class="mono {% if s.hit %}good{% else %}bad{% endif %}"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type }}</td><td>{{ '%.2f'|format(s.deliv_z) if s.deliv_z else '—' }}</td><td>{% if s.hit %}✅{% else %}❌{% endif %}</td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<div class="empty">No Micro Cap signals yet</div>
+{% endif %}
+</div></div>
   <div class="card"><div class="label">Profitable %</div><div class="value">{{ (summary.profitable_pct * 100)|round(1) if summary.profitable_pct else '—' }}%</div></div>
 </div>
 

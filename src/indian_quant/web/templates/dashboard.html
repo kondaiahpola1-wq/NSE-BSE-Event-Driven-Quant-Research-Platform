@@ -52,11 +52,31 @@
 <div class="empty">No open paper positions</div>
 {% endif %}
 
+<div class="section-title">Signals by Market Cap</div>
+<div class="grid grid-4">
+  <div class="card">
+    <div class="label">Large Cap</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Large Cap")|list|length if signals.all else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Mid Cap</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Mid Cap")|list|length if signals.all else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Small Cap</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Small Cap")|list|length if signals.all else 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Micro Cap</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Micro Cap")|list|length if signals.all else 0 }}</div>
+  </div>
+</div>
+
 <div class="section-title">Today's Signals ({{ signals.date if signals.date else 'no data' }})</div>
 {% if signals.buys %}
-<table><tr><th>Stock</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return %</th></tr>
+<table><tr><th>Stock</th><th>Market Cap</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return %</th></tr>
 {% for s in signals.buys %}
-<tr><td class="mono" style="color:var(--green)"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--green);text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.segment }}</td><td class="mono">₹{{ s.close }}</td><td>{{ s.deliv_pct }}%</td><td class="mono good">{{ s.deliv_z }}</td><td class="{% if s.ret_1d_pct > 0 %}good{% else %}bad{% endif %}">{{ s.ret_1d_pct }}%</td></tr>
+<tr><td class="mono" style="color:var(--green)"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--green);text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.market_cap_class or '—' }}</td><td>{{ s.segment }}</td><td class="mono">₹{{ s.close }}</td><td>{{ s.deliv_pct }}%</td><td class="mono good">{{ s.deliv_z }}</td><td class="{% if s.ret_1d_pct > 0 %}good{% else %}bad{% endif %}">{{ s.ret_1d_pct }}%</td></tr>
 {% endfor %}</table>
 {% else %}
 <div class="empty">No BUY candidates today — discipline is also a position</div>
@@ -64,9 +84,9 @@
 
 {% if signals.avoids %}
 <div class="section-title">🔴 Avoid / Exit-Watch</div>
-<table><tr><th>Stock</th><th>Close</th><th>Delivery %</th><th>Z-Score</th></tr>
+<table><tr><th>Stock</th><th>Market Cap</th><th>Close</th><th>Delivery %</th><th>Z-Score</th></tr>
 {% for s in signals.avoids %}
-<tr><td class="mono" style="color:var(--red)"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--red);text-decoration:underline">{{ s.symbol }}</a></td><td class="mono">₹{{ s.close }}</td><td>{{ s.deliv_pct }}%</td><td class="mono warn">{{ s.deliv_z }}</td></tr>
+<tr><td class="mono" style="color:var(--red)"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--red);text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.market_cap_class or '—' }}</td><td class="mono">₹{{ s.close }}</td><td>{{ s.deliv_pct }}%</td><td class="mono warn">{{ s.deliv_z }}</td></tr>
 {% endfor %}</table>
 {% endif %}
 

@@ -124,11 +124,15 @@ async def suggestions_page(request: Request):
            GROUP BY signal_type ORDER BY avg_net DESC"""
     ).fetchall()]
     con.close()
+    # Get cached signals for market cap breakdown
+    cached_signals = get_latest_signals_cached()
+    all_signals = cached_signals.get("all", [])
     return templates.TemplateResponse(request, "suggestions.html", {
         "request": request,
         "summary": summary,
         "recent": recent,
         "by_type": by_type,
+        "signals": all_signals,
         "username": get_current_username(request),
     })
 

@@ -58,5 +58,21 @@ def ensure_pg_schema():
         sa.Column("target_price", sa.Float),
         sa.Column("volume", sa.Float),
         sa.Column("cached_at", sa.String(32)),
+        sa.Column("market_cap_class", sa.String(16)),
+        sa.Column("market_cap_cr", sa.Float),
     )
     meta.create_all(engine)
+
+    # Add columns to existing table if missing
+    try:
+        with engine.begin() as conn:
+            try:
+                conn.execute(sa.text("ALTER TABLE cached_signals ADD COLUMN market_cap_class VARCHAR(16)"))
+            except Exception:
+                pass
+            try:
+                conn.execute(sa.text("ALTER TABLE cached_signals ADD COLUMN market_cap_cr FLOAT"))
+            except Exception:
+                pass
+    except Exception:
+        pass

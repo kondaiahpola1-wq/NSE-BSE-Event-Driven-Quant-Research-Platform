@@ -55,6 +55,7 @@ def get_latest_signals_cached() -> dict[str, Any]:
             "date": latest_date,
             "buys": buys,
             "avoids": avoids,
+            "all": signals,
             "total_scanned": len(signals),
         }
 
@@ -75,12 +76,13 @@ def get_latest_signals_cached() -> dict[str, Any]:
                 "date": str(latest_date),
                 "buys": buys,
                 "avoids": avoids,
+                "all": signals,
                 "total_scanned": int(len(today)),
             }
     except Exception:
         pass
 
-    return {"date": "", "buys": [], "avoids": [], "total_scanned": 0}
+    return {"date": "", "buys": [], "avoids": [], "all": [], "total_scanned": 0}
 
 
 def get_cached_signal_for_symbol(symbol: str) -> dict[str, Any] | None:
