@@ -53,8 +53,7 @@ def _scan_today(settings) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def cmd_record(settings, *, capital: float, risk_pct: float,
-               price_min: float, price_max: float, min_turnover: float) -> int:
+def cmd_record(settings, *, capital: float, risk_pct: float) -> int:
     df = _scan_today(settings)
     if df.empty:
         print("no delivery data")
@@ -73,22 +72,23 @@ def cmd_record(settings, *, capital: float, risk_pct: float,
     created = 0
     risk_rupees = capital * risk_pct / 100.0
 
+    # NO price/turnover filters — scan ALL stocks
     buys = day[
         (day["deliv_z"] >= 2)
         & (day["ret_1d"] >= 0.005)
-        & (day["close"] >= price_min)
-        & (day["close"] <= price_max)
     ]
+
+    # Classify by market cap
+    from indian_quant.features.market_cap import get_market_cap, load_mcap_cache, save_mcap_cache
+    from indian_quant.ingestion.router import SourceRouter
+    router = SourceRouter()
+    cache = load_mcap_cache()
 
     for _, r in buys.iterrows():
         if r["symbol"] in existing:
             continue
 
-        # Turnover filter (volume in lakhs from bhavcopy → convert to rupees)
-        vol = r.get("volume", 0) or 0
-        turnover = r["close"] * vol
-        if turnover < min_turnover:
-            continue
+        mcap_info = get_market_cap(router, r["symbol"], "NSE", cache)
 
         stop_dist = r["close"] * 0.07
         qty_by_risk = int(risk_rupees // stop_dist) if stop_dist > 0 else 0
@@ -119,11 +119,13 @@ def cmd_record(settings, *, capital: float, risk_pct: float,
             horizon_days=10,
             qty=qty,
             predicted_return_bps=60.0,  # from R2 research mean
-            note=f"z={r['deliv_z']:.2f}",
+            note=f"z={r['deliv_z']:.2f} mcap={mcap_info['market_cap_class']}",
         )
         created += 1
-        print(f"  RECORDED #{sid}: {r['symbol']} @₹{r['close']:.2f} qty={qty} z={r['deliv_z']:.2f}")
+        print(f"  RECORDED #{sid}: {r['symbol']} @₹{r['close']:.2f} qty={qty} "
+              f"z={r['deliv_z']:.2f} [{mcap_info['market_cap_class']}]")
 
+    save_mcap_cache(cache)
     summary = metadata.suggestions_summary()
     metadata.close()
     print(json.dumps({"created_today": created, **summary}, indent=1))
@@ -209,9 +211,6 @@ def main() -> int:
     rec = sub.add_parser("record")
     rec.add_argument("--capital", type=float, default=25_000.0)
     rec.add_argument("--risk-pct", type=float, default=1.0)
-    rec.add_argument("--price-min", type=float, default=20.0)
-    rec.add_argument("--price-max", type=float, default=500.0)
-    rec.add_argument("--min-turnover", type=float, default=10_000_000.0)
 
     sub.add_parser("settle")
 
@@ -221,9 +220,7 @@ def main() -> int:
     settings = load_settings()
 
     if args.command == "record":
-        return cmd_record(settings, capital=args.capital, risk_pct=args.risk_pct,
-                          price_min=args.price_min, price_max=args.price_max,
-                          min_turnover=args.min_turnover)
+        return cmd_record(settings, capital=args.capital, risk_pct=args.risk_pct)
     elif args.command == "settle":
         return cmd_settle(settings)
     elif args.command == "report":

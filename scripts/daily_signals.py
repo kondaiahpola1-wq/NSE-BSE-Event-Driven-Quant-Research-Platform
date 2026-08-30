@@ -1,12 +1,12 @@
 """Daily signal report: today's delivery-signal candidates across the universe.
 
 Scans the latest delivery lake day, fires dz_hi_up / avoidance (dz_hi_dn)
-signals, applies liquidity + price filters, sizes positions against
-configured risk capital, and prints a morning sheet.
+signals for ALL stocks (no price/turnover filters), classifies by market cap
+(Large/Mid/Small/Micro), sizes positions against configured risk capital,
+and prints a morning sheet.
 
 Usage:
-    python scripts/daily_signals.py [--capital 25000] [--risk-pct 1]
-                                    [--price-max 500] [--top 10]
+    python scripts/daily_signals.py [--capital 25000] [--risk-pct 1] [--top 10]
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ import pandas as pd
 
 from indian_quant.config import load_settings
 from indian_quant.features.delivery import add_features, prepare_frame
+from indian_quant.features.market_cap import classify_by_value, get_market_cap, load_mcap_cache, save_mcap_cache
 
 
 def scan_symbol(path: Path) -> dict | None:
@@ -60,10 +61,6 @@ def main() -> int:
     parser.add_argument("--capital", type=float, default=25_000.0)
     parser.add_argument("--risk-pct", type=float, default=1.0,
                         help="max account risk per position, percent")
-    parser.add_argument("--price-max", type=float, default=500.0)
-    parser.add_argument("--price-min", type=float, default=20.0)
-    parser.add_argument("--min-turnover", type=float, default=10_000_000,
-                        help="min median daily turnover in rupees (liquidity floor)")
     parser.add_argument("--top", type=int, default=10)
     args = parser.parse_args()
 
@@ -81,19 +78,34 @@ def main() -> int:
 
     df = pd.DataFrame(rows)
     df = df[df["_date"] == latest_date]
-    liquid = df[df["median_turnover"] >= args.min_turnover]
 
-    buys = liquid[
-        (liquid["deliv_z"] >= 2)
-        & (liquid["ret_1d_pct"] >= 0.5)
-        & (liquid["close"] <= args.price_max)
-        & (liquid["close"] >= args.price_min)
-    ].sort_values("deliv_z", ascending=False).head(args.top)
+    # NO price/turnover filters — scan ALL stocks
+    buys = df[
+        (df["deliv_z"] >= 2)
+        & (df["ret_1d_pct"] >= 0.5)
+    ].sort_values("deliv_z", ascending=False)
 
-    avoid = liquid[
-        (liquid["deliv_z"] >= 2)
-        & (liquid["ret_1d_pct"] <= -0.5)
-    ].sort_values("deliv_z", ascending=False).head(args.top)
+    avoid = df[
+        (df["deliv_z"] >= 2)
+        & (df["ret_1d_pct"] <= -0.5)
+    ].sort_values("deliv_z", ascending=False)
+
+    # Classify by market cap
+    from indian_quant.ingestion.router import SourceRouter
+    router = SourceRouter()
+    cache = load_mcap_cache()
+
+    for _, r in buys.iterrows():
+        info = get_market_cap(router, r["symbol"], "NSE", cache)
+        r["market_cap_cr"] = info["market_cap_cr"]
+        r["market_cap_class"] = info["market_cap_class"]
+
+    for _, r in avoid.iterrows():
+        info = get_market_cap(router, r["symbol"], "NSE", cache)
+        r["market_cap_cr"] = info["market_cap_cr"]
+        r["market_cap_class"] = info["market_cap_class"]
+
+    save_mcap_cache(cache)
 
     risk_rupees = args.capital * args.risk_pct / 100.0
 
@@ -105,28 +117,43 @@ def main() -> int:
         by_capital = int((args.capital * 0.3) // (row["close"] * 1))
         return max(0, min(by_risk, by_capital))
 
-    print("=" * 74)
-    print(f" DAILY DELIVERY SIGNALS · data through {latest_date}")
-    print(f" capital ₹{args.capital:,.0f} | risk/pos {args.risk_pct}% = ₹{risk_rupees:,.0f} "
-          f"| price band {args.price_min}-{args.price_max}")
-    print("=" * 74)
+    print("=" * 90)
+    print(f" DAILY DELIVERY SIGNALS · data through {latest_date} · ALL stocks (no price filter)")
+    print(f" capital ₹{args.capital:,.0f} | risk/pos {args.risk_pct}% = ₹{risk_rupees:,.0f}")
+    print("=" * 90)
 
     if buys.empty:
         print("\n(no BUY candidates today - discipline is also a position)")
     else:
-        print("\n🟢 ACCUMULATION CANDIDATES (delivery z≥2 on up-move) — "
-              "reference hold ~3-10d\n")
-        for _, r in buys.iterrows():
-            qty = size(r)
-            print(f"  {r['symbol']:<14} {r['segment']:<4} close ₹{r['close']:>9,.2f} "
-                  f"| deliv {r['deliv_pct']}% (z {r['deliv_z']}) "
-                  f"| vol z {r['vol_z']} | qty {qty}")
+        # Group by market cap
+        for tier in ["Large Cap", "Mid Cap", "Small Cap", "Micro Cap"]:
+            tier_buys = buys[buys["market_cap_class"] == tier]
+            if tier_buys.empty:
+                continue
+            print(f"\n🟢 {tier.upper()} — ACCUMULATION CANDIDATES ({len(tier_buys)} stocks)\n")
+            for _, r in tier_buys.head(args.top).iterrows():
+                qty = size(r)
+                mcap_str = f"₹{r['market_cap_cr']:,.0f}Cr" if r.get("market_cap_cr") else "—"
+                print(f"  {r['symbol']:<14} {r['segment']:<4} ₹{r['close']:>9,.2f} "
+                      f"| deliv {r['deliv_pct']}% (z {r['deliv_z']}) "
+                      f"| vol z {r['vol_z']} | mcap {mcap_str} | qty {qty}")
 
     if not avoid.empty:
-        print("\n🔴 AVOID / EXIT-WATCH (distribution: delivery z≥2 on down-move)\n")
-        for _, r in avoid.iterrows():
-            print(f"  {r['symbol']:<14} {r['segment']:<4} close ₹{r['close']:>9,.2f} "
-                  f"| deliv {r['deliv_pct']}% (z {r['deliv_z']})")
+        print(f"\n🔴 AVOID / EXIT-WATCH ({len(avoid)} stocks)\n")
+        for _, r in avoid.head(args.top).iterrows():
+            mcap_str = f"₹{r['market_cap_cr']:,.0f}Cr" if r.get("market_cap_cr") else "—"
+            print(f"  {r['symbol']:<14} {r['segment']:<4} ₹{r['close']:>9,.2f} "
+                  f"| deliv {r['deliv_pct']}% (z {r['deliv_z']}) | mcap {mcap_str}")
+
+    # Summary
+    print(f"\n{'=' * 90}")
+    print(f" Total: {len(buys)} BUY candidates, {len(avoid)} AVOID across {len(df)} stocks scanned")
+    print(f" Market cap breakdown BUY: ", end="")
+    for tier in ["Large Cap", "Mid Cap", "Small Cap", "Micro Cap"]:
+        n = len(buys[buys["market_cap_class"] == tier])
+        if n > 0:
+            print(f"{tier}={n} ", end="")
+    print()
 
     print("\nNotes: signals are research output, not advice. Entry via limit orders.")
     print("Re-run after 18:30 IST for same-day delivery data refresh.")

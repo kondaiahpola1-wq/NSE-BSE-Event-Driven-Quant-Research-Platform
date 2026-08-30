@@ -47,23 +47,31 @@ def _scan_today(settings) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def cmd_snapshot(settings, *, capital: float, risk_pct: float,
-                 price_min: float, price_max: float) -> int:
+def cmd_snapshot(settings, *, capital: float, risk_pct: float) -> int:
     df = _scan_today(settings)
     if df.empty:
         print("no delivery data")
         return 1
     latest = df["date"].max()
     day = df[df["date"] == latest]
-    liquid = day[day["close"].between(price_min, price_max)]
 
-    buys = liquid[(liquid["deliv_z"] >= 2) & (liquid["ret_1d"] >= 0.005)]
+    # NO price filter — scan ALL stocks
+    buys = day[(day["deliv_z"] >= 2) & (day["ret_1d"] >= 0.005)]
+
+    # Classify by market cap
+    from indian_quant.features.market_cap import get_market_cap, load_mcap_cache, save_mcap_cache
+    from indian_quant.ingestion.router import SourceRouter
+    router = SourceRouter()
+    cache = load_mcap_cache()
+
     metadata = MetadataStore(settings.storage.metadata_dsn)
     open_syms = {p["symbol"] for p in metadata.open_papers()}
     created = 0
     for _, r in buys.iterrows():
         if r["symbol"] in open_syms:
             continue
+
+        mcap_info = get_market_cap(router, r["symbol"], "NSE", cache)
         risk_rupees = capital * risk_pct / 100.0
         stop_dist = r["close"] * 0.07
         qty_by_risk = int(risk_rupees // stop_dist) if stop_dist > 0 else 0
@@ -74,11 +82,13 @@ def cmd_snapshot(settings, *, capital: float, risk_pct: float,
         metadata.record_paper_signal(
             symbol=r["symbol"], close_at_signal=float(r["close"]), qty=qty,
             horizon_days=10, stop_pct=0.07, segment=str(r["segment"]),
-            note=f"dz={r['deliv_z']}",
+            note=f"dz={r['deliv_z']:.2f} mcap={mcap_info['market_cap_class']}",
         )
         created += 1
         print(f"OPEN {r['symbol']} @{r['close']:.2f} qty {qty} "
-              f"(z {r['deliv_z']})")
+              f"(z {r['deliv_z']}) [{mcap_info['market_cap_class']}]")
+
+    save_mcap_cache(cache)
     summary = metadata.papers_summary()
     metadata.close()
     print(json.dumps({"created": created, **summary}, indent=1))
@@ -138,8 +148,6 @@ def main() -> int:
     snap = sub.add_parser("snapshot")
     snap.add_argument("--capital", type=float, default=25_000.0)
     snap.add_argument("--risk-pct", type=float, default=1.0)
-    snap.add_argument("--price-min", type=float, default=20.0)
-    snap.add_argument("--price-max", type=float, default=500.0)
 
     sub.add_parser("settle")
 
@@ -152,8 +160,7 @@ def main() -> int:
 
     if args.command == "snapshot":
         return cmd_snapshot(settings, capital=args.capital,
-                            risk_pct=args.risk_pct, price_min=args.price_min,
-                            price_max=args.price_max)
+                            risk_pct=args.risk_pct)
     if args.command == "settle":
         return cmd_settle(settings)
     if args.command == "report":

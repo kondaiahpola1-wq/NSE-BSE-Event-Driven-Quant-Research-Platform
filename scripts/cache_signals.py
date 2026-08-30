@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from indian_quant.config import load_settings
 from indian_quant.features.delivery import add_features, prepare_frame
+from indian_quant.features.market_cap import classify_signals as classify_signals_mcap
 from indian_quant.ingestion.router import SourceRouter
 from indian_quant.web.prod_config import (
     REDIS_TTL,
@@ -36,48 +37,6 @@ from indian_quant.web.prod_config import (
     get_pg_engine,
     get_redis_client,
 )
-
-
-def load_market_cap() -> dict[str, dict]:
-    """Load real market cap data from data/universe/market_cap.json."""
-    mcap_file = Path("data/universe/market_cap.json")
-    if mcap_file.exists():
-        try:
-            return json.loads(mcap_file.read_text())
-        except Exception:
-            pass
-    return {}
-
-
-def classify_market_cap(mcap_data: dict, symbol: str, exchange: str) -> str:
-    """Classify market cap from real data. Fallback to 'Unknown' if not found."""
-    key = f"{exchange}|{symbol}"
-    entry = mcap_data.get(key)
-    if entry:
-        return entry.get("market_cap_class", "Unknown")
-    return "Unknown"
-
-
-def add_market_cap_to_signals(signals: list[dict]) -> list[dict]:
-    """Add real market cap classification to each signal."""
-    mcap_data = load_market_cap()
-    if not mcap_data:
-        print("Warning: No market cap data found, skipping classification")
-        return signals
-
-    for s in signals:
-        s["market_cap_class"] = classify_market_cap(mcap_data, s["symbol"], s["exchange"])
-        key = f"{s['exchange']}|{s['symbol']}"
-        entry = mcap_data.get(key, {})
-        s["market_cap_cr"] = entry.get("market_cap_cr", None)
-
-    # Summary
-    classes = {}
-    for s in signals:
-        cls = s.get("market_cap_class", "Unknown")
-        classes[cls] = classes.get(cls, 0) + 1
-    print(f"Market cap classification: {classes}")
-    return signals
 
 
 def compute_signal_from_bars(
@@ -448,8 +407,8 @@ def main() -> int:
                 )
         print(f"BSE done: {bse_count} signals ({time.time() - t0:.0f}s)", flush=True)
 
-    # Add real market cap classification
-    signals = add_market_cap_to_signals(signals)
+    # Classify all signals by market cap
+    signals = classify_signals_mcap(signals, router)
 
     # enrich MCP corporate actions (skipped — MCP NSE API blocked from datacenter IPs)
     # signals = enrich_with_corporate_actions(signals, router)
