@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # SEBI-style thresholds (in ₹ Cr)
 LARGE_CAP_MIN = 20_000
 MID_CAP_MIN = 5_000
-SMALL_CAP_MIN = 500
+SMALL_CAP_MIN = 1_000
 # Below SMALL_CAP_MIN = Micro Cap
 
 MCAP_FILE = Path("data/universe/market_cap.json")
@@ -99,10 +99,13 @@ def get_market_cap(router: Any, symbol: str, exchange: str = "NSE",
 def classify_signals(signals: list[dict], router: Any | None = None) -> list[dict]:
     """Add market cap classification to all signals.
 
-    Uses disk cache for speed. If router provided, fetches missing values.
+    Uses disk cache for speed. Only calls router for cache misses.
     """
     cache = load_mcap_cache()
-    updated = 0
+    has_cache = len(cache) > 0
+    fetched = 0
+    cache_hits = 0
+    cache_misses = 0
 
     for s in signals:
         symbol = s.get("symbol", "")
@@ -110,26 +113,31 @@ def classify_signals(signals: list[dict], router: Any | None = None) -> list[dic
         key = f"{exchange}|{symbol}"
 
         if key in cache:
-            s["market_cap_cr"] = cache[key].get("market_cap_cr")
-            s["market_cap_class"] = cache[key].get("market_cap_class", "Unknown")
-        elif router:
+            entry = cache[key]
+            s["market_cap_cr"] = entry.get("market_cap_cr")
+            s["market_cap_class"] = entry.get("market_cap_class", "Unknown")
+            cache_hits += 1
+        elif cache and not has_cache:
+            # Only call router if no disk cache exists (slow)
             info = get_market_cap(router, symbol, exchange, cache)
             s["market_cap_cr"] = info["market_cap_cr"]
             s["market_cap_class"] = info["market_cap_class"]
-            updated += 1
+            fetched += 1
         else:
+            # Cache miss but cache file exists — mark Other
             s["market_cap_cr"] = None
-            s["market_cap_class"] = "Unknown"
+            s["market_cap_class"] = "Other"
+            cache_misses += 1
 
-    if updated > 0:
+    if fetched > 0:
         save_mcap_cache(cache)
-        logger.info(f"Fetched market cap for {updated} new symbols")
 
     # Summary
     classes: dict[str, int] = {}
     for s in signals:
         cls = s.get("market_cap_class", "Unknown")
         classes[cls] = classes.get(cls, 0) + 1
-    print(f"Market cap distribution: {classes}")
+    print(f"Market cap: {cache_hits} cached, {fetched} fetched, {cache_misses} misses")
+    print(f"Distribution: {classes}")
 
     return signals

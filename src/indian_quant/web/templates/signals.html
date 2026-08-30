@@ -21,8 +21,8 @@
     <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Small Cap")|list|length if signals.all else 0 }}</div>
   </div>
   <div class="card">
-    <div class="label">Micro Cap</div>
-    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Micro Cap")|list|length if signals.all else 0 }}</div>
+    <div class="label">Other</div>
+    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Other")|list|length if signals.all else 0 }}</div>
   </div>
 </div>
 
@@ -72,15 +72,15 @@
 {% endfor %}</table>
 {% else %}<div class="empty">No Small Cap signals</div>{% endif %}
 
-<div class="section-title">Micro Cap Signals</div>
-{% set filtered = signals.all|selectattr("market_cap_class", "equalto", "Micro Cap")|list %}
+<div class="section-title">Other Signals</div>
+{% set filtered = signals.all|selectattr("market_cap_class", "equalto", "Other")|list %}
 {% if filtered %}
-<h2>Micro Cap ({{ filtered|length }})</h2>
+<h2>Other ({{ filtered|length }})</h2>
 <table style="font-size:11px"><tr><th>Symbol</th><th>Type</th><th>Close</th><th>Z-Score</th><th>RSI</th></tr>
 {% for s in filtered[:10] %}
 <tr><td class="mono"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td><td>{{ s.signal_type or '—' }}</td><td>₹{{ s.close }}</td><td>{{ s.deliv_z or '—' }}</td><td>{{ s.rsi or '—' }}</td></tr>
 {% endfor %}</table>
-{% else %}<div class="empty">No Micro Cap signals</div>{% endif %}
+{% else %}<div class="empty">No Other signals</div>{% endif %}
 
 <p style="margin-top:20px;color:var(--faint);font-size:12px">
   Entry via limit orders. Hold ~3-10 days. Stop at 7%. Re-check after 18:30 IST for fresh data.

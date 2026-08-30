@@ -148,7 +148,7 @@ def compute_signal_from_bars(
             "sma_50": round(float(last["sma_50"]), 2) if pd.notna(last.get("sma_50")) else None,
             "atr_14": round(atr, 2),
             "hi_streak": 0,
-            "signal_type": None,
+            "signal_type": signal_type,
             "entry_zone_low": round(close - atr * 0.5, 2),
             "entry_zone_high": round(close, 2),
             "stop_loss": round(close * 0.93, 2),
