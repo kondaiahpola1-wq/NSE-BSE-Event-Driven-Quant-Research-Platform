@@ -623,8 +623,12 @@ class SourceRouter:
                 if result is not None:
                     self.cb.record_success("free_mcp")
                     if isinstance(result, dict):
-                        return result.get("market_cap") or result.get("marketCap")
-                    return result
+                        mc = result.get("market_cap") or result.get("marketCap")
+                        if mc is not None:
+                            return mc
+                        # Dict returned but no market_cap key — continue to yfinance
+                    else:
+                        return result
             except Exception as exc:
                 logger.warning(f"Free MCP market cap failed: {exc}")
                 self.cb.record_failure("free_mcp")
@@ -633,7 +637,7 @@ class SourceRouter:
         try:
             import yfinance as yf
 
-            ticker = yf.Ticker(symbol)
+            ticker = yf.Ticker(f"{symbol}.NS")
             info = ticker.info
             result = info.get("marketCap")
             if result is not None:
