@@ -26,48 +26,65 @@
   </div>
 </div>
 
-<h2>🟢 Accumulation Candidates (dz_hi_up)</h2>
-{% if signals.buys %}
-<table><tr><th>#</th><th>Symbol</th><th>Market Cap (₹ Cr)</th><th>Type</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return</th><th>RSI</th><th>Entry Zone</th><th>Stop Loss</th><th>Target</th></tr>
-{% for s in signals.buys %}
-<tr><td>{{ loop.index }}</td><td class="mono good"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--green);text-decoration:underline">{{ s.symbol }}</a></td><td class="mono">{% if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr %}₹{{ "{:,.0f}".format(s.market_cap_cr) }}{% else %}—{% endif %}</td><td>{{ s.signal_type or '—' }}</td><td>{{ s.segment }}</td><td class="mono">₹{{ s.close }}</td><td class="mono">{{ s.deliv_pct }}%</td><td class="mono">{{ s.deliv_z }}</td><td>{% if s.ret_1d_pct > 0 %}+{% endif %}{{ s.ret_1d_pct }}%</td><td class="mono">{{ s.rsi or '—' }}</td><td class="mono">₹{{ s.entry_zone_low }}–{{ s.entry_zone_high }}</td><td class="mono bad">₹{{ s.stop_loss }}</td><td class="mono good">₹{{ s.target_price }}</td></tr>
-{% endfor %}</table>
-{% else %}<div class="empty">No accumulation signals today</div>{% endif %}
+<div class="filter-bar" id="filterBar">
+  <span style="color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:1px">Filter:</span>
+  <button class="filter-btn active" onclick="filterCap('All')">All</button>
+  <button class="filter-btn" onclick="filterCap('Large Cap')">Large Cap</button>
+  <button class="filter-btn" onclick="filterCap('Mid Cap')">Mid Cap</button>
+  <button class="filter-btn" onclick="filterCap('Small Cap')">Small Cap</button>
+  <button class="filter-btn" onclick="filterCap('Other')">Other</button>
+  <div class="filter-sep"></div>
+  <span style="color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:1px">Sort:</span>
+  <button class="filter-btn active" id="sortScore" onclick="sortTable('score',true)">Score ▼</button>
+  <button class="filter-btn" id="sortZ" onclick="sortTable('deliv_z',true)">Z-Score</button>
+  <button class="filter-btn" id="sortDel" onclick="sortTable('deliv_pct',true)">Delivery %</button>
+  <button class="filter-btn" id="sortRet" onclick="sortTable('ret_1d_pct',true)">Return</button>
+  <button class="filter-btn" id="sortMcap" onclick="sortTable('market_cap_cr',true)">Market Cap</button>
+  <div class="filter-sep"></div>
+  <button class="filter-btn" onclick="showTop(20,true)" style="color:var(--green)">Top 20 Good</button>
+  <button class="filter-btn" onclick="showTop(20,false)" style="color:var(--red)">Top 20 Bad</button>
+  <button class="filter-btn" onclick="showAll()">Show All</button>
+  <span id="rowCount" style="color:var(--faint);font-size:11px;margin-left:8px"></span>
+</div>
 
-{% if signals.avoids %}
-<h2>🔴 Distribution / Avoid</h2>
-<table><tr><th>#</th><th>Symbol</th><th>Market Cap (₹ Cr)</th><th>Type</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return</th><th>RSI</th><th>Entry Zone</th><th>Stop Loss</th><th>Target</th></tr>
-{% for s in signals.avoids %}
-<tr><td>{{ loop.index }}</td><td class="mono bad"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:var(--red);text-decoration:underline">{{ s.symbol }}</a></td><td class="mono">{% if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr %}₹{{ "{:,.0f}".format(s.market_cap_cr) }}{% else %}—{% endif %}</td><td>{{ s.signal_type or '—' }}</td><td>{{ s.segment }}</td><td class="mono">₹{{ s.close }}</td><td class="mono">{{ s.deliv_pct }}%</td><td class="mono warn">{{ s.deliv_z }}</td><td>{{ s.ret_1d_pct }}%</td><td class="mono">{{ s.rsi or '—' }}</td><td class="mono">₹{{ s.entry_zone_low }}–{{ s.entry_zone_high }}</td><td class="mono bad">₹{{ s.stop_loss }}</td><td class="mono good">₹{{ s.target_price }}</td></tr>
-{% endfor %}</table>
-{% endif %}
-
-{% for cat in ["Large Cap", "Mid Cap", "Small Cap", "Other"] %}
-{% set filtered = signals.all|selectattr("market_cap_class", "equalto", cat)|list %}
-{% if filtered %}
-<div class="section-title">{{ cat }} — {{ filtered|length }} signals</div>
-<table>
-<tr><th>#</th><th>Symbol</th><th>Market Cap (₹ Cr)</th><th>Type</th><th>Segment</th><th>Close</th><th>Delivery %</th><th>Z-Score</th><th>1d Return</th><th>RSI</th><th>Entry Zone</th><th>Stop Loss</th><th>Target</th></tr>
-{% for s in filtered|sort(attribute='market_cap_cr', reverse=true) %}
+<table id="signalTable">
 <tr>
+  <th class="sortable" data-col="idx">#</th>
+  <th class="sortable" data-col="symbol">Symbol</th>
+  <th class="sortable" data-col="market_cap_cr">Market Cap (₹ Cr)</th>
+  <th class="sortable" data-col="market_cap_class">Cap Class</th>
+  <th class="sortable" data-col="signal_type">Type</th>
+  <th>Segment</th>
+  <th class="sortable" data-col="close">Close</th>
+  <th class="sortable" data-col="deliv_pct">Delivery %</th>
+  <th class="sortable" data-col="deliv_z">Z-Score</th>
+  <th class="sortable" data-col="ret_1d_pct">1d Return</th>
+  <th class="sortable" data-col="rsi">RSI</th>
+  <th>Entry Zone</th>
+  <th>Stop Loss</th>
+  <th>Target</th>
+  <th class="sortable" data-col="score">Score</th>
+</tr>
+{% for s in signals.all %}
+<tr data-cap="{{ s.market_cap_class }}" data-z="{{ s.deliv_z or 0 }}" data-del="{{ s.deliv_pct or 0 }}" data-ret="{{ s.ret_1d_pct or 0 }}" data-mcap="{{ s.market_cap_cr if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr else 0 }}" data-rsi="{{ s.rsi or 0 }}" data-type="{{ s.signal_type or '' }}">
   <td>{{ loop.index }}</td>
   <td class="mono"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td>
-  <td class="mono">{% if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr %}₹{{ "{:,.0f}".format(s.market_cap_cr) }}{% else %}—{% endif %}</td>
-  <td>{{ s.signal_type or '—' }}</td>
+  <td class="mono" data-val="{{ s.market_cap_cr if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr else 0 }}">{% if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr %}₹{{ "{:,.0f}".format(s.market_cap_cr) }}{% else %}—{% endif %}</td>
+  <td data-val="{{ s.market_cap_class }}">{{ s.market_cap_class or '—' }}</td>
+  <td data-val="{{ s.signal_type or '' }}">{{ s.signal_type or '—' }}</td>
   <td>{{ s.segment }}</td>
-  <td class="mono">₹{{ s.close }}</td>
-  <td class="mono">{% if s.deliv_pct %}{{ s.deliv_pct }}%{% else %}—{% endif %}</td>
-  <td class="mono">{% if s.deliv_z %}{{ s.deliv_z }}{% else %}—{% endif %}</td>
-  <td>{% if s.ret_1d_pct > 0 %}+{% endif %}{{ s.ret_1d_pct }}%</td>
-  <td class="mono">{% if s.rsi %}{{ s.rsi }}{% else %}—{% endif %}</td>
+  <td class="mono" data-val="{{ s.close }}">₹{{ s.close }}</td>
+  <td class="mono" data-val="{{ s.deliv_pct or 0 }}">{% if s.deliv_pct %}{{ s.deliv_pct }}%{% else %}—{% endif %}</td>
+  <td class="mono" data-val="{{ s.deliv_z or 0 }}">{% if s.deliv_z %}{{ s.deliv_z }}{% else %}—{% endif %}</td>
+  <td data-val="{{ s.ret_1d_pct or 0 }}">{% if s.ret_1d_pct > 0 %}+{% endif %}{{ s.ret_1d_pct }}%</td>
+  <td class="mono" data-val="{{ s.rsi or 0 }}">{% if s.rsi %}{{ s.rsi }}{% else %}—{% endif %}</td>
   <td class="mono">₹{{ s.entry_zone_low }}–{{ s.entry_zone_high }}</td>
   <td class="mono bad">₹{{ s.stop_loss }}</td>
   <td class="mono good">₹{{ s.target_price }}</td>
+  <td class="mono" data-val="0"><span class="score-badge">—</span></td>
 </tr>
 {% endfor %}
 </table>
-{% else %}<div class="empty">No {{ cat }} signals</div>{% endif %}
-{% endfor %}
 
 <p style="margin-top:20px;color:var(--faint);font-size:12px">
   Entry via limit orders. Hold ~3-10 days. Stop at 7%. Re-check after 18:30 IST for fresh data.
@@ -75,4 +92,128 @@
 {% else %}
 <div class="empty">No signal data available. Run <code>make update</code> first.</div>
 {% endif %}
+
+<script>
+(function(){
+  const table = document.getElementById('signalTable');
+  if(!table) return;
+  const rows = Array.from(table.querySelectorAll('tr[data-cap]'));
+  let currentSort = {col:'score', desc:true};
+  let currentCap = 'All';
+  let topN = null;
+  let topGood = true;
+
+  function num(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
+
+  function computeScores(){
+    const zVals=rows.map(r=>num(r.dataset.z));
+    const dVals=rows.map(r=>num(r.dataset.del));
+    const rVals=rows.map(r=>num(r.dataset.ret));
+    const zMin=Math.min(...zVals), zMax=Math.max(...zVals);
+    const dMin=Math.min(...dVals), dMax=Math.max(...dVals);
+    const rMin=Math.min(...rVals), rMax=Math.max(...rVals);
+    const zRange=zMax-zMin||1, dRange=dMax-dMin||1, rRange=rMax-rMin||1;
+    rows.forEach((r,i)=>{
+      const zn=(zVals[i]-zMin)/zRange;
+      const dn=(dVals[i]-dMin)/dRange;
+      const rn=(rVals[i]-rMin)/rRange;
+      const score=(zn*0.50)+(dn*0.30)+(rn*0.20);
+      r.dataset.score=score.toFixed(4);
+      const cell=r.querySelectorAll('td')[r.querySelectorAll('td').length-1];
+      const cls=score>=0.66?'score-top':score>=0.33?'score-mid':'score-low';
+      cell.innerHTML='<span class="score-badge '+cls+'">'+score.toFixed(2)+'</span>';
+      cell.dataset.val=score.toFixed(4);
+    });
+  }
+
+  function getVisible(){
+    return rows.filter(r=>{
+      if(currentCap!=='All' && r.dataset.cap!==currentCap) return false;
+      return true;
+    });
+  }
+
+  function render(){
+    const visible=getVisible();
+    if(topN){
+      const sorted=visible.slice().sort((a,b)=>{
+        return topGood ? num(b.dataset.score)-num(a.dataset.score) : num(a.dataset.score)-num(b.dataset.score);
+      });
+      const show=sorted.slice(0,topN);
+      rows.forEach(r=>{ r.classList.toggle('row-hidden', !show.includes(r)); });
+    }
+    document.getElementById('rowCount').textContent=visible.length+' of '+rows.length+' signals';
+  }
+
+  function updateHeaders(){
+    table.querySelectorAll('th.sortable').forEach(th=>{
+      th.classList.remove('sort-asc','sort-desc');
+      if(th.dataset.col===currentSort.col){
+        th.classList.add(currentSort.desc?'sort-desc':'sort-asc');
+      }
+    });
+    document.querySelectorAll('#filterBar .filter-btn').forEach(b=>b.classList.remove('active'));
+  }
+
+  window.filterCap=function(cap){
+    currentCap=cap; topN=null;
+    updateHeaders();
+    const btns=document.querySelectorAll('#filterBar .filter-btn');
+    btns.forEach(b=>{ if(b.textContent.trim()===cap||(cap==='All'&&b.textContent.trim()==='All')) b.classList.add('active'); });
+    render();
+  };
+
+  window.sortTable=function(col,init){
+    if(!init && currentSort.col===col){ currentSort.desc=!currentSort.desc; }
+    else { currentSort.col=col; currentSort.desc=true; }
+    topN=null;
+    updateHeaders();
+    const btn=document.getElementById('sort'+col.charAt(0).toUpperCase()+col.slice(1).replace(/_([a-z])/g,(m,c)=>c.toUpperCase()));
+    if(btn) btn.classList.add('active');
+    const dir=currentSort.desc?-1:1;
+    const sorted=rows.slice().sort((a,b)=>{
+      let va,vb;
+      if(col==='score'){ va=num(a.dataset.score); vb=num(b.dataset.score); }
+      else if(col==='symbol'){ va=a.dataset.type||''; vb=b.dataset.type||''; }
+      else if(col==='market_cap_class'){ va=a.dataset.cap; vb=b.dataset.cap; }
+      else if(col==='signal_type'){ va=a.dataset.type; vb=b.dataset.type; }
+      else { va=num(a.querySelector('[data-val="'+col+'"]')?.dataset.val||0); vb=num(b.querySelector('[data-val="'+col+'"]')?.dataset.val||0); }
+      if(typeof va==='string') return va.localeCompare(vb)*dir;
+      return (va-vb)*dir;
+    });
+    sorted.forEach(r=>table.appendChild(r));
+    render();
+  };
+
+  window.showTop=function(n,good){
+    topN=n; topGood=good;
+    updateHeaders();
+    const btn=document.getElementById('sortScore');
+    if(btn) btn.classList.add('active');
+    const visible=getVisible();
+    const sorted=visible.slice().sort((a,b)=>{
+      return good ? num(b.dataset.score)-num(a.dataset.score) : num(a.dataset.score)-num(b.dataset.score);
+    });
+    const show=new Set(sorted.slice(0,n));
+    rows.forEach(r=>{ r.classList.toggle('row-hidden', !show.has(r)); });
+    document.getElementById('rowCount').textContent=Math.min(n,visible.length)+' of '+rows.length+' signals (Top '+(good?'Good':'Bad')+')';
+  };
+
+  window.showAll=function(){
+    topN=null; currentCap='All';
+    updateHeaders();
+    document.querySelector('#filterBar .filter-btn').classList.add('active');
+    rows.forEach(r=>r.classList.remove('row-hidden'));
+    document.getElementById('rowCount').textContent=rows.length+' of '+rows.length+' signals';
+  };
+
+  table.querySelectorAll('th.sortable').forEach(th=>{
+    th.addEventListener('click',function(){ sortTable(this.dataset.col,false); });
+  });
+
+  computeScores();
+  render();
+  sortTable('score',true);
+})();
+</script>
 {% endblock %}

@@ -43,6 +43,20 @@ td{padding:8px 12px;border-bottom:1px solid rgba(28,42,66,.5)}
 .section-title{font-size:13px;color:var(--green);margin:28px 0 12px;text-transform:uppercase;letter-spacing:1.5px;font-family:var(--mono)}
 .empty{color:var(--faint);padding:20px;text-align:center;font-style:italic}
 .chart-container{position:relative;height:250px;margin-top:12px}
+.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+.sortable:hover{color:var(--green)}
+.sort-asc::after{content:' ▲';font-size:9px;color:var(--green)}
+.sort-desc::after{content:' ▼';font-size:9px;color:var(--green)}
+.filter-bar{display:flex;gap:6px;align-items:center;margin:14px 0;flex-wrap:wrap}
+.filter-btn{padding:4px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--dim);cursor:pointer;font-size:12px;font-family:var(--mono);transition:all .15s}
+.filter-btn:hover{color:var(--txt);border-color:var(--dim)}
+.filter-btn.active{color:var(--green);border-color:var(--green);background:rgba(0,229,160,.08)}
+.filter-sep{width:1px;height:18px;background:var(--line);margin:0 4px}
+.score-badge{display:inline-block;padding:1px 6px;border-radius:4px;font-size:11px;font-family:var(--mono)}
+.score-top{color:var(--green);background:rgba(0,229,160,.12)}
+.score-mid{color:var(--orange);background:rgba(255,180,84,.12)}
+.score-low{color:var(--red);background:rgba(255,107,129,.12)}
+.row-hidden{display:none}
 </style>
 </head>
 <body>
