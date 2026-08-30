@@ -3,11 +3,11 @@
 Sources (priority order):
   BSE bars:  Upstox V3 → bseindia lib → yfinance
   NSE bars:  Upstox V3 → bhavcopy CDN → yfinance
-  Corporate actions: MCP → dalal
-  Fundamentals: FinStack → Indian Market MCP → dalal → yfinance
-  Market cap: FinStack → Indian Market MCP → MCP (bse_list_securities) → yfinance
+  Corporate actions: MCP → Free MCP (hosted) → yfinance
+  Fundamentals: FinStack → Indian Market MCP → Free MCP → yfinance
+  Market cap: FinStack → Indian Market MCP → Free MCP → yfinance
   FII/DII: FinStack → yfinance
-  Shareholding: FinStack → Indian Market MCP
+  Shareholding: FinStack → Indian Market MCP → Free MCP
 """
 
 from __future__ import annotations
@@ -63,13 +63,30 @@ class CircuitBreaker:
 
 
 class SourceRouter:
-    """Orchestrate fallback cascade with circuit breakers and rate limiting."""
+    """Orchestrate fallback cascade with circuit breakers and rate limiting.
+
+    Fallback order for each data type:
+      Corporate actions: MCP (nse-bse-mcp) → Free MCP (indian-market/nse-public/tapetide) → yfinance
+      Fundamentals:      FinStack → IndianMarket → Free MCP → yfinance
+      Market cap:        FinStack → IndianMarket → Free MCP → yfinance
+      BSE bars:          Upstox → bseindia → yfinance
+      NSE bars:          Upstox → bhavcopy CDN → yfinance
+    """
 
     def __init__(self, raw_store: RawStore | None = None) -> None:
         self.cb = CircuitBreaker()
         self.raw_store = raw_store
         self._rate_limit = 0.0  # seconds between requests per source
         self._last_request: float = 0.0
+        self._free_mcp: Any = None  # lazy-init FreeMcpClient
+
+    def _get_free_mcp(self) -> Any:
+        """Lazy-init the free MCP fallback client."""
+        if self._free_mcp is None:
+            from indian_quant.ingestion.mcp.free_client import FreeMcpClient
+
+            self._free_mcp = FreeMcpClient()
+        return self._free_mcp
 
     # ── rate limiting ──────────────────────────────────────────
 
@@ -475,9 +492,9 @@ class SourceRouter:
     def get_corporate_actions(self, symbol: str | None = None, exchange: str = "NSE") -> Any:
         """Get corporate actions via fallback cascade.
 
-        Cascade: MCP → dalal
+        Cascade: MCP → Free MCP (hosted) → yfinance
         """
-        # 1. MCP
+        # 1. Primary MCP (nse-bse-mcp)
         if exchange == "NSE":
             result = self._mcp_corporate_actions(symbol)
             if result is not None:
@@ -489,16 +506,32 @@ class SourceRouter:
             if result is not None:
                 return result
 
-        # 3. dalal
-        try:
-            import dalal
+        # 3. Free MCP fallback (indian-market-mcp / nse-public / tapetide)
+        if symbol and not self.cb.is_open("free_mcp"):
+            try:
+                free = self._get_free_mcp()
+                suffix = ".NS" if exchange == "NSE" else ".BO"
+                result = free.call_tool("get_corporate_actions", {"symbol": f"{symbol}{suffix}"})
+                if result is not None:
+                    self.cb.record_success("free_mcp")
+                    return result
+            except Exception as exc:
+                logger.warning(f"Free MCP corporate actions failed: {exc}")
+                self.cb.record_failure("free_mcp")
 
-            result = dalal.actions(symbol=symbol, exchange=exchange)
-            self.cb.record_success("dalal")
-            return result
-        except Exception as exc:
-            logger.warning(f"dalal actions failed: {exc}")
-            self.cb.record_failure("dalal")
+        # 4. yfinance (last resort)
+        if symbol:
+            try:
+                import yfinance as yf
+
+                suffix = ".NS" if exchange == "NSE" else ".BO"
+                ticker = yf.Ticker(f"{symbol}{suffix}")
+                actions = ticker.actions
+                if actions is not None and not actions.empty:
+                    self.cb.record_success("yfinance")
+                    return actions.to_dict()
+            except Exception as exc:
+                logger.warning(f"yfinance corporate actions failed: {exc}")
 
         return None
 
@@ -507,7 +540,7 @@ class SourceRouter:
     def get_fundamentals(self, symbol: str, exchange: str = "BSE") -> Any:
         """Get fundamentals using fallback cascade.
 
-        Cascade: FinStack → Indian Market MCP → dalal → yfinance
+        Cascade: FinStack → Indian Market MCP → Free MCP → yfinance
         """
         # 1. FinStack (NSE + BSE, free)
         try:
@@ -525,13 +558,37 @@ class SourceRouter:
         except Exception:
             pass
 
-        # 3. dalal (BSE only)
+        # 3. Free MCP fallback (indian-market-mcp / nse-public / tapetide)
+        if not self.cb.is_open("free_mcp"):
+            try:
+                free = self._get_free_mcp()
+                suffix = ".NS" if exchange == "NSE" else ".BO"
+                result = free.call_tool("get_fundamentals", {"symbol": f"{symbol}{suffix}"})
+                if result is not None:
+                    self.cb.record_success("free_mcp")
+                    return result
+            except Exception as exc:
+                logger.warning(f"Free MCP fundamentals failed: {exc}")
+                self.cb.record_failure("free_mcp")
+
+        # 4. yfinance (last resort)
         try:
-            result = self._dalal_fundamentals(symbol, exchange)
-            if result is not None:
-                return result
-        except Exception:
-            pass
+            import yfinance as yf
+
+            suffix = ".NS" if exchange == "NSE" else ".BO"
+            ticker = yf.Ticker(f"{symbol}{suffix}")
+            info = ticker.info
+            if info and info.get("trailingPE"):
+                self.cb.record_success("yfinance")
+                return {
+                    "pe_ratio": info.get("trailingPE"),
+                    "pb_ratio": info.get("priceToBook"),
+                    "market_cap": info.get("marketCap"),
+                    "roe": info.get("returnOnEquity"),
+                    "sector": info.get("sector"),
+                }
+        except Exception as exc:
+            logger.warning(f"yfinance fundamentals failed: {exc}")
 
         return None
 
@@ -540,7 +597,7 @@ class SourceRouter:
     def get_market_cap(self, symbol: str) -> float | None:
         """Get market cap using fallback cascade.
 
-        Cascade: FinStack → Indian Market MCP → yfinance
+        Cascade: FinStack → Indian Market MCP → Free MCP → yfinance
         """
         # 1. FinStack (NSE, free)
         try:
@@ -558,7 +615,21 @@ class SourceRouter:
         except Exception:
             pass
 
-        # 3. yfinance (last resort)
+        # 3. Free MCP fallback (indian-market-mcp / nse-public / tapetide)
+        if not self.cb.is_open("free_mcp"):
+            try:
+                free = self._get_free_mcp()
+                result = free.call_tool("get_market_cap", {"symbol": f"{symbol}.NS"})
+                if result is not None:
+                    self.cb.record_success("free_mcp")
+                    if isinstance(result, dict):
+                        return result.get("market_cap") or result.get("marketCap")
+                    return result
+            except Exception as exc:
+                logger.warning(f"Free MCP market cap failed: {exc}")
+                self.cb.record_failure("free_mcp")
+
+        # 4. yfinance (last resort)
         try:
             import yfinance as yf
 
@@ -595,7 +666,7 @@ class SourceRouter:
     def get_shareholding(self, symbol: str) -> dict[str, Any] | None:
         """Get shareholding pattern using fallback cascade.
 
-        Cascade: FinStack → Indian Market MCP
+        Cascade: FinStack → Indian Market MCP → Free MCP
         """
         # 1. FinStack (free)
         try:
@@ -616,6 +687,18 @@ class SourceRouter:
                 return result
         except Exception:
             pass
+
+        # 3. Free MCP fallback
+        if not self.cb.is_open("free_mcp"):
+            try:
+                free = self._get_free_mcp()
+                result = free.call_tool("get_shareholding", {"symbol": f"{symbol}.NS"})
+                if result is not None:
+                    self.cb.record_success("free_mcp")
+                    return result
+            except Exception as exc:
+                logger.warning(f"Free MCP shareholding failed: {exc}")
+                self.cb.record_failure("free_mcp")
 
         return None
 

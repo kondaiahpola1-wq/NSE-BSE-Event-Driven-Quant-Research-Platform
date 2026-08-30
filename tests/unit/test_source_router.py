@@ -118,13 +118,15 @@ class TestSourceRouterFaultInjection:
             patch.object(router, "_indian_market_market_cap", return_value=None),
             patch.object(
                 router,
-                "_dalal_fundamentals",
-                return_value={"pe": 25.0},
-            ) as mock_dalal,
+                "_get_free_mcp",
+            ) as mock_free_mcp,
         ):
+            mock_client = MagicMock()
+            mock_client.call_tool.return_value = {"pe": 25.0}
+            mock_free_mcp.return_value = mock_client
             result = router.get_fundamentals("TEST")
             assert result == {"pe": 25.0}
-            mock_dalal.assert_called_once()
+            mock_client.call_tool.assert_called_once()
 
     def test_market_cap_cascade(self):
         router = SourceRouter()
