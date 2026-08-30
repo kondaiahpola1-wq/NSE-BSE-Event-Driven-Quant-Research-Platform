@@ -36,6 +36,15 @@ def _start_scheduler():
     import contextlib
     with contextlib.suppress(Exception):
         start_scheduler()
+    # Ensure default user exists for watchlist FK constraint
+    try:
+        ws = _ws()
+        if not ws.get_user_by_username("admin"):
+            ws.create_user("admin", "admin@local.dev", "dev-only-hash")
+            logger.info("Created default admin user")
+        ws.close()
+    except Exception:
+        pass
 
 
 @app.on_event("shutdown")

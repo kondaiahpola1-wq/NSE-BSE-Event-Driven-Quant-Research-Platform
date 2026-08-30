@@ -62,6 +62,9 @@ class WatchlistStore:
     # ── Watchlists ─────────────────────────────────────────────────────
 
     def add_stock(self, user_id: int, symbol: str, notes: str = "") -> int:
+        # Ensure user exists (prevents FK constraint failure)
+        if not self.get_user_by_id(user_id):
+            self.create_user("admin", "admin@local.dev", "dev-only-hash")
         cur = self._con.execute(
             "INSERT INTO watchlists (user_id, symbol, exchange, added_at, notes) "
             "VALUES (?, ?, 'NSE', datetime('now'), ?)",
