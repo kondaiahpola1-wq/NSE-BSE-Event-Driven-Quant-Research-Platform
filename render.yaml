@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: nse-bse-quant
+    runtime: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: NSE_QUANT_PG_DSN
+        sync: false
+      - key: NSE_QUANT_REDIS_URL
+        sync: false
+      - key: REDIS_TTL
+        value: "3600"
+    healthCheckPath: /
+    autoDeploy: true
+    branch: main

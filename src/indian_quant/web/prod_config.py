@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 PG_DSN = os.getenv("NSE_QUANT_PG_DSN", "postgresql://postgres:quant2026@127.0.0.1:5432/postgres")
 REDIS_URL = os.getenv("NSE_QUANT_REDIS_URL", "redis://127.0.0.1:6379/0")
-REDIS_TTL = 3600  # 1 hour cache TTL
+REDIS_TTL = int(os.getenv("REDIS_TTL", "3600"))
 
 
 @lru_cache

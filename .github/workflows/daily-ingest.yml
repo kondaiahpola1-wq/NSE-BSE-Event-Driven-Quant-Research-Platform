@@ -1,0 +1,51 @@
+name: Daily Data Ingestion
+
+on:
+  schedule:
+    - cron: '30 12 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Ingest NSE delivery data
+        env:
+          NSE_QUANT_PG_DSN: ${{ secrets.NEON_PG_DSN }}
+          NSE_QUANT_REDIS_URL: ${{ secrets.UPSTASH_REDIS_URL }}
+        run: uv run python scripts/bulk_ingest.py --source nse --type delivery
+
+      - name: Ingest BSE delivery data
+        env:
+          NSE_QUANT_PG_DSN: ${{ secrets.NEON_PG_DSN }}
+          NSE_QUANT_REDIS_URL: ${{ secrets.UPSTASH_REDIS_URL }}
+        run: uv run python scripts/bulk_ingest.py --source bse --type delivery
+
+      - name: Rebuild signal cache
+        env:
+          NSE_QUANT_PG_DSN: ${{ secrets.NEON_PG_DSN }}
+          NSE_QUANT_REDIS_URL: ${{ secrets.UPSTASH_REDIS_URL }}
+        run: uv run python scripts/cache_signals.py
+
+      - name: Neon keep-alive
+        env:
+          NSE_QUANT_PG_DSN: ${{ secrets.NEON_PG_DSN }}
+        run: |
+          uv run python -c "
+          import os, sqlalchemy as sa
+          dsn = os.environ['NSE_QUANT_PG_DSN']
+          e = sa.create_engine(dsn)
+          with e.connect() as c:
+              r = c.execute(sa.text('SELECT 1'))
+              print(f'Neon keep-alive OK: {r.scalar()}')
+          "

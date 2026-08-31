@@ -14,7 +14,6 @@ data/normalized/**
 data/validated/**
 data/catalog/**
 data/research.duckdb
-data/metadata.db
 !data/**/.gitkeep
 
 # Notebooks
@@ -23,6 +22,7 @@ data/metadata.db
 # Env & secrets
 .env
 .env.*
+!.env.example
 *.token
 
 # OS / editors
