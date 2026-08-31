@@ -21,7 +21,10 @@ REDIS_TTL = int(os.getenv("REDIS_TTL", "3600"))
 
 @lru_cache
 def get_pg_engine():
-    return sa.create_engine(PG_DSN, pool_size=5, max_overflow=10, pool_pre_ping=True)
+    connect_args = {}
+    if PG_DSN.startswith("postgresql"):
+        connect_args["connect_timeout"] = 5
+    return sa.create_engine(PG_DSN, pool_size=2, max_overflow=5, pool_pre_ping=True, connect_args=connect_args)
 
 
 @lru_cache

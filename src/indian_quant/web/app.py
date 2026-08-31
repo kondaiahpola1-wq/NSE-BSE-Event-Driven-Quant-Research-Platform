@@ -34,14 +34,18 @@ app.add_middleware(SessionMiddleware, secret_key="nse-bse-quant-9f8e7d6c5b4a3210
 @app.on_event("startup")
 def _start_scheduler():
     import contextlib
-    with contextlib.suppress(Exception):
-        start_scheduler()
+    import threading
+    def _delayed_start():
+        import time
+        time.sleep(5)
+        with contextlib.suppress(Exception):
+            start_scheduler()
+    threading.Thread(target=_delayed_start, daemon=True).start()
     # Ensure default user exists for watchlist FK constraint
     try:
         ws = _ws()
         if not ws.get_user_by_username("admin"):
             ws.create_user("admin", "admin@local.dev", "dev-only-hash")
-            logger.info("Created default admin user")
         ws.close()
     except Exception:
         pass
@@ -57,6 +61,11 @@ def _ws() -> WatchlistStore:
     settings = load_settings()
     db = Path(settings.storage.metadata_dsn.removeprefix("sqlite:///"))
     return WatchlistStore(db)
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.get("/", response_class=HTMLResponse)
