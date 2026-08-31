@@ -47,6 +47,11 @@ if [ "$DO_STOP" = true ]; then
     exec "$ROOT/stop_platform.sh"
 fi
 
+# port_open <port> — works even for sockets owned by another user (unlike fuser)
+port_open() {
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null && exec 3<&- 3>&-
+}
+
 echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║   NSE-BSE Quant Research Platform — Start   ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
@@ -103,7 +108,7 @@ echo
 
 # ── Step 4: Start web dashboard ────────────────────────────────────────
 echo -e "${YELLOW}▶ Step 4: Web dashboard...${NC}"
-if fuser 8080/tcp >/dev/null 2>&1; then
+if port_open 8080; then
     echo -e "  Already running ✓"
 else
     if [ "$FOREGROUND" = true ]; then
@@ -114,7 +119,7 @@ else
     else
         setsid .venv/bin/uvicorn indian_quant.web.app:app --host 127.0.0.1 --port 8080 --log-level warning < /dev/null > /tmp/web.log 2>&1 &
         sleep 3
-        if fuser 8080/tcp >/dev/null 2>&1; then
+        if port_open 8080; then
             echo -e "  ${GREEN}✓ Started (port 8080)${NC}"
         else
             echo -e "  ${RED}✗ Failed — check /tmp/web.log${NC}"
@@ -131,7 +136,7 @@ echo
 
 check_port() {
     local port=$1 name=$2
-    if fuser "$port/tcp" >/dev/null 2>&1; then
+    if port_open "$port"; then
         echo -e "  ${GREEN}●${NC} $name — port $port — ${GREEN}running${NC}"
     else
         echo -e "  ${RED}●${NC} $name — port $port — ${RED}not running${NC}"
