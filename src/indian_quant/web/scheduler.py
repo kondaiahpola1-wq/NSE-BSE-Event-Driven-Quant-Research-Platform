@@ -44,6 +44,7 @@ def _warm_redis() -> None:
     """Quick Redis warm from PostgreSQL (no parquet scan)."""
     try:
         import json
+        import math
 
         import pandas as pd
 
@@ -57,22 +58,81 @@ def _warm_redis() -> None:
             return
 
         signals = df.to_dict(orient="records")
+
+        # Sanitize NaN/Inf before JSON serialization
+        _sanitize_nan(signals)
+
+        # Pre-compute composite scores
+        _compute_scores(signals)
+
+        def _j(obj):
+            return json.dumps(obj, default=str)
+
         pipe = r.pipeline()
         pipe.delete("signals:all", "signals:buys", "signals:avoids")
         buys = [s for s in signals if s.get("signal_type") == "dz_hi_up"]
         avoids = [s for s in signals if s.get("signal_type") == "dz_hi_dn"]
-        pipe.set("signals:all", json.dumps(signals, default=str), ex=3600)
-        pipe.set("signals:buys", json.dumps(buys, default=str), ex=3600)
-        pipe.set("signals:avoids", json.dumps(avoids, default=str), ex=3600)
+        pipe.set("signals:all", _j(signals), ex=3600)
+        pipe.set("signals:buys", _j(buys), ex=3600)
+        pipe.set("signals:avoids", _j(avoids), ex=3600)
         pipe.set("signals:date", signals[0]["signal_date"] if signals else "", ex=3600)
         pipe.set("signals:count", str(len(signals)), ex=3600)
         for s in signals:
-            pipe.hset("signals:by_symbol", s["symbol"], json.dumps(s, default=str))
+            pipe.hset("signals:by_symbol", s["symbol"], _j(s))
         pipe.expire("signals:by_symbol", 3600)
         pipe.execute()
         logger.info(f"Redis warmed: {len(signals)} signals")
     except Exception as e:
         logger.warning(f"Redis warm failed: {e}")
+
+
+def _sanitize_nan(signals: list[dict]) -> None:
+    """Replace NaN/Inf floats with None in-place for JSON safety."""
+    import math
+    for s in signals:
+        for k, v in s.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                s[k] = None
+
+
+def _compute_scores(signals: list[dict]) -> None:
+    """Compute composite score for each signal in-place. Sanitizes NaN."""
+    import math
+
+    def _safe(v):
+        try:
+            f = float(v)
+            return None if math.isnan(f) or math.isinf(f) else f
+        except (TypeError, ValueError):
+            return None
+
+    if not signals:
+        return
+
+    z_vals = []
+    d_vals = []
+    r_vals = []
+    for s in signals:
+        z = _safe(s.get("deliv_z"))
+        d = _safe(s.get("deliv_pct"))
+        r = _safe(s.get("ret_1d_pct"))
+        z_vals.append(z if z is not None else 0)
+        d_vals.append(d if d is not None else 0)
+        r_vals.append(r if r is not None else 0)
+
+    z_min, z_max = min(z_vals), max(z_vals)
+    d_min, d_max = min(d_vals), max(d_vals)
+    r_min, r_max = min(r_vals), max(r_vals)
+
+    z_range = z_max - z_min or 1
+    d_range = d_max - d_min or 1
+    r_range = r_max - r_min or 1
+
+    for i, s in enumerate(signals):
+        zn = (z_vals[i] - z_min) / z_range
+        dn = (d_vals[i] - d_min) / d_range
+        rn = (r_vals[i] - r_min) / r_range
+        s["_score"] = round(zn * 0.50 + dn * 0.30 + rn * 0.20, 4)
 
 
 def start_scheduler() -> BackgroundScheduler:

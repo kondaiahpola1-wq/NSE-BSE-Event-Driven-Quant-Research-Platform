@@ -85,11 +85,32 @@ async def dashboard(request: Request):
 @app.get("/signals", response_class=HTMLResponse)
 async def signals_page(request: Request):
     signals = get_latest_signals_cached()
+    all_sigs = signals.get("all", [])
+    # Pre-count market cap classes for initial render
+    from collections import Counter
+    cap_counts = Counter(s.get("market_cap_class", "Other") for s in all_sigs)
     return templates.TemplateResponse(request, "signals.html", {
         "request": request,
-        "signals": signals,
+        "signals": {"date": signals.get("date", ""), "total": len(all_sigs)},
+        "cap_counts": cap_counts,
         "username": get_current_username(request),
     })
+
+
+@app.get("/api/signals")
+async def api_signals(
+    cap: str = "All",
+    sort: str = "score",
+    order: str = "desc",
+    signal_type: str = "All",
+    page: int = 1,
+    per_page: int = 50,
+):
+    from indian_quant.web.fast_loader import get_signals_for_api
+    return get_signals_for_api(
+        cap=cap, sort=sort, order=order,
+        signal_type=signal_type, page=page, per_page=per_page,
+    )
 
 
 @app.get("/positions", response_class=HTMLResponse)

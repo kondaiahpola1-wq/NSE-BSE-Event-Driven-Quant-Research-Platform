@@ -3,217 +3,249 @@
 {% block nav_signals %}active{% endblock %}
 {% block content %}
 <h1>Signal Sheet</h1>
-{% if signals.date %}
-<div class="sub" style="color:var(--faint);margin-bottom:16px">Data through {{ signals.date }} · {{ signals.total_scanned }} symbols scanned</div>
+<div class="sub" style="color:var(--faint);margin-bottom:16px">Data through {{ signals.date }} · {{ signals.total }} signals</div>
 
 <div class="section-title">Signals by Market Cap</div>
 <div class="grid grid-4">
-  <div class="card">
-    <div class="label">Large Cap</div>
-    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Large Cap")|list|length if signals.all else 0 }}</div>
-  </div>
-  <div class="card">
-    <div class="label">Mid Cap</div>
-    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Mid Cap")|list|length if signals.all else 0 }}</div>
-  </div>
-  <div class="card">
-    <div class="label">Small Cap</div>
-    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Small Cap")|list|length if signals.all else 0 }}</div>
-  </div>
-  <div class="card">
-    <div class="label">Other</div>
-    <div class="value">{{ signals.all|selectattr("market_cap_class", "equalto", "Other")|list|length if signals.all else 0 }}</div>
-  </div>
+  <div class="card"><div class="label">Large Cap</div><div class="value">{{ cap_counts.get('Large Cap', 0) }}</div></div>
+  <div class="card"><div class="label">Mid Cap</div><div class="value">{{ cap_counts.get('Mid Cap', 0) }}</div></div>
+  <div class="card"><div class="label">Small Cap</div><div class="value">{{ cap_counts.get('Small Cap', 0) }}</div></div>
+  <div class="card"><div class="label">Other</div><div class="value">{{ cap_counts.get('Other', 0) + cap_counts.get('Micro Cap', 0) }}</div></div>
 </div>
 
 <div class="filter-bar" id="filterBar">
   <span style="color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:1px">Filter:</span>
-  <button class="filter-btn active" onclick="filterCap('All')">All</button>
-  <button class="filter-btn" onclick="filterCap('Large Cap')">Large Cap</button>
-  <button class="filter-btn" onclick="filterCap('Mid Cap')">Mid Cap</button>
-  <button class="filter-btn" onclick="filterCap('Small Cap')">Small Cap</button>
-  <button class="filter-btn" onclick="filterCap('Other')">Other</button>
+  <button class="filter-btn active" data-cap="All">All</button>
+  <button class="filter-btn" data-cap="Large Cap">Large Cap</button>
+  <button class="filter-btn" data-cap="Mid Cap">Mid Cap</button>
+  <button class="filter-btn" data-cap="Small Cap">Small Cap</button>
+  <button class="filter-btn" data-cap="Other">Other</button>
   <div class="filter-sep"></div>
   <span style="color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:1px">Sort:</span>
-  <button class="filter-btn active" id="sortScore" onclick="sortTable('score',true)">Score ▼</button>
-  <button class="filter-btn" id="sortZ" onclick="sortTable('deliv_z',true)">Z-Score</button>
-  <button class="filter-btn" id="sortDel" onclick="sortTable('deliv_pct',true)">Delivery %</button>
-  <button class="filter-btn" id="sortRet" onclick="sortTable('ret_1d_pct',true)">Return</button>
-  <button class="filter-btn" id="sortMcap" onclick="sortTable('market_cap_cr',true)">Market Cap</button>
+  <button class="filter-btn active" data-sort="score" id="sortScore">Score ▼</button>
+  <button class="filter-btn" data-sort="deliv_z" id="sortDeliv_z">Z-Score</button>
+  <button class="filter-btn" data-sort="deliv_pct" id="sortDeliv_pct">Delivery %</button>
+  <button class="filter-btn" data-sort="ret_1d_pct" id="sortRet_1d_pct">Return</button>
+  <button class="filter-btn" data-sort="market_cap_cr" id="sortMarket_cap_cr">Market Cap</button>
   <div class="filter-sep"></div>
-  <button class="filter-btn" onclick="showTop(20,true)" style="color:var(--green)">Top 20 Good</button>
-  <button class="filter-btn" onclick="showTop(20,false)" style="color:var(--red)">Top 20 Bad</button>
-  <button class="filter-btn" onclick="showAll()">Show All</button>
+  <button class="filter-btn" data-action="top20good" style="color:var(--green)">Top 20 Good</button>
+  <button class="filter-btn" data-action="top20bad" style="color:var(--red)">Top 20 Bad</button>
+  <button class="filter-btn" data-action="reset">Show All</button>
   <span id="rowCount" style="color:var(--faint);font-size:11px;margin-left:8px"></span>
 </div>
 
 <table id="signalTable">
 <tr>
-  <th class="sortable" data-col="idx">#</th>
-  <th class="sortable" data-col="symbol">Symbol</th>
-  <th class="sortable" data-col="market_cap_cr">Market Cap (₹ Cr)</th>
-  <th class="sortable" data-col="market_cap_class">Cap Class</th>
-  <th class="sortable" data-col="signal_type">Type</th>
+  <th>#</th>
+  <th data-sort="symbol">Symbol</th>
+  <th data-sort="market_cap_cr">Market Cap (₹ Cr)</th>
+  <th data-sort="market_cap_class">Cap Class</th>
+  <th data-sort="signal_type">Type</th>
   <th>Segment</th>
-  <th class="sortable" data-col="close">Close</th>
-  <th class="sortable" data-col="deliv_pct">Delivery %</th>
-  <th class="sortable" data-col="deliv_z">Z-Score</th>
-  <th class="sortable" data-col="ret_1d_pct">1d Return</th>
-  <th class="sortable" data-col="rsi">RSI</th>
+  <th data-sort="close">Close</th>
+  <th data-sort="deliv_pct">Delivery %</th>
+  <th data-sort="deliv_z">Z-Score</th>
+  <th data-sort="ret_1d_pct">1d Return</th>
+  <th data-sort="rsi">RSI</th>
   <th>Entry Zone</th>
   <th>Stop Loss</th>
   <th>Target</th>
-  <th class="sortable" data-col="score">Score</th>
+  <th data-sort="score">Score</th>
 </tr>
-{% for s in signals.all %}
-<tr data-cap="{{ s.market_cap_class }}" data-z="{{ s.deliv_z or 0 }}" data-del="{{ s.deliv_pct or 0 }}" data-ret="{{ s.ret_1d_pct or 0 }}" data-mcap="{{ s.market_cap_cr if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr else 0 }}" data-rsi="{{ s.rsi or 0 }}" data-type="{{ s.signal_type or '' }}">
-  <td>{{ loop.index }}</td>
-  <td class="mono"><a href="/stock/{{ s.symbol }}" target="_blank" style="color:inherit;text-decoration:underline">{{ s.symbol }}</a></td>
-  <td class="mono" data-val="{{ s.market_cap_cr if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr else 0 }}">{% if s.market_cap_cr and s.market_cap_cr == s.market_cap_cr %}₹{{ "{:,.0f}".format(s.market_cap_cr) }}{% else %}—{% endif %}</td>
-  <td data-val="{{ s.market_cap_class }}">{{ s.market_cap_class or '—' }}</td>
-  <td data-val="{{ s.signal_type or '' }}">{{ s.signal_type or '—' }}</td>
-  <td>{{ s.segment }}</td>
-  <td class="mono" data-val="{{ s.close }}">₹{{ s.close }}</td>
-  <td class="mono" data-val="{{ s.deliv_pct or 0 }}">{% if s.deliv_pct %}{{ s.deliv_pct }}%{% else %}—{% endif %}</td>
-  <td class="mono" data-val="{{ s.deliv_z or 0 }}">{% if s.deliv_z %}{{ s.deliv_z }}{% else %}—{% endif %}</td>
-  <td data-val="{{ s.ret_1d_pct or 0 }}">{% if s.ret_1d_pct > 0 %}+{% endif %}{{ s.ret_1d_pct }}%</td>
-  <td class="mono" data-val="{{ s.rsi or 0 }}">{% if s.rsi %}{{ s.rsi }}{% else %}—{% endif %}</td>
-  <td class="mono">₹{{ s.entry_zone_low }}–{{ s.entry_zone_high }}</td>
-  <td class="mono bad">₹{{ s.stop_loss }}</td>
-  <td class="mono good">₹{{ s.target_price }}</td>
-  <td class="mono" data-val="0"><span class="score-badge">—</span></td>
-</tr>
-{% endfor %}
+<tbody id="sigBody"></tbody>
 </table>
+
+<div id="pagination" style="display:flex;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap"></div>
 
 <p style="margin-top:20px;color:var(--faint);font-size:12px">
   Entry via limit orders. Hold ~3-10 days. Stop at 7%. Re-check after 18:30 IST for fresh data.
 </p>
-{% else %}
-<div class="empty">No signal data available. Run <code>make update</code> first.</div>
-{% endif %}
 
 <script>
 (function(){
-  const table = document.getElementById('signalTable');
-  if(!table) return;
-  const rows = Array.from(table.querySelectorAll('tr[data-cap]'));
-  let currentSort = {col:'score', desc:true};
-  let currentCap = 'All';
-  let topN = null;
-  let topGood = true;
+  const state = { page:1, per_page:50, cap:'All', sort:'score', order:'desc', signal_type:'All' };
+  let totalPages = 0;
+  let topN = null, topGood = true;
 
-  function num(v){ const n=parseFloat(v); return isNaN(n)?0:n; }
+  const $body = document.getElementById('sigBody');
+  const $row = document.getElementById('rowCount');
+  const $pg = document.getElementById('pagination');
 
-  function computeScores(){
-    const zVals=rows.map(r=>num(r.dataset.z));
-    const dVals=rows.map(r=>num(r.dataset.del));
-    const rVals=rows.map(r=>num(r.dataset.ret));
-    const zMin=Math.min(...zVals), zMax=Math.max(...zVals);
-    const dMin=Math.min(...dVals), dMax=Math.max(...dVals);
-    const rMin=Math.min(...rVals), rMax=Math.max(...rVals);
-    const zRange=zMax-zMin||1, dRange=dMax-dMin||1, rRange=rMax-rMin||1;
-    rows.forEach((r,i)=>{
-      const zn=(zVals[i]-zMin)/zRange;
-      const dn=(dVals[i]-dMin)/dRange;
-      const rn=(rVals[i]-rMin)/rRange;
-      const score=(zn*0.50)+(dn*0.30)+(rn*0.20);
-      r.dataset.score=score.toFixed(4);
-      const cell=r.querySelectorAll('td')[r.querySelectorAll('td').length-1];
-      const cls=score>=0.66?'score-top':score>=0.33?'score-mid':'score-low';
-      cell.innerHTML='<span class="score-badge '+cls+'">'+score.toFixed(2)+'</span>';
-      cell.dataset.val=score.toFixed(4);
-    });
+  function scoreBadge(v){
+    if(v===null||v===undefined) return '—';
+    const cls = v>=0.66?'score-top':v>=0.33?'score-mid':'score-low';
+    return '<span class="score-badge '+cls+'">'+v.toFixed(2)+'</span>';
   }
 
-  function getVisible(){
-    return rows.filter(r=>{
-      if(currentCap!=='All' && r.dataset.cap!==currentCap) return false;
-      return true;
-    });
+  function rowHtml(s, idx){
+    const mcap = s.market_cap_cr!=null ? '₹'+Number(s.market_cap_cr).toLocaleString('en-IN',{maximumFractionDigits:0}) : '—';
+    const dPct = s.deliv_pct!=null ? s.deliv_pct+'%' : '—';
+    const zVal = s.deliv_z!=null ? s.deliv_z : '—';
+    const ret = s.ret_1d_pct!=null ? (s.ret_1d_pct>0?'+':'')+s.ret_1d_pct+'%' : '—';
+    const rsi = s.rsi!=null ? s.rsi : '—';
+    const entry = s.entry_zone_low!=null ? '₹'+s.entry_zone_low+'–'+s.entry_zone_high : '—';
+    const sl = s.stop_loss!=null ? '₹'+s.stop_loss : '—';
+    const tgt = s.target_price!=null ? '₹'+s.target_price : '—';
+    const capCls = s.market_cap_class || '—';
+    return '<tr>'
+      + '<td>'+idx+'</td>'
+      + '<td class="mono"><a href="/stock/'+s.symbol+'" target="_blank" style="color:inherit;text-decoration:underline">'+s.symbol+'</a></td>'
+      + '<td class="mono">'+mcap+'</td>'
+      + '<td>'+capCls+'</td>'
+      + '<td>'+(s.signal_type||'—')+'</td>'
+      + '<td>'+(s.segment||'')+'</td>'
+      + '<td class="mono">₹'+(s.close||'')+'</td>'
+      + '<td class="mono">'+dPct+'</td>'
+      + '<td class="mono">'+zVal+'</td>'
+      + '<td>'+ret+'</td>'
+      + '<td class="mono">'+rsi+'</td>'
+      + '<td class="mono">'+entry+'</td>'
+      + '<td class="mono bad">'+sl+'</td>'
+      + '<td class="mono good">'+tgt+'</td>'
+      + '<td class="mono">'+scoreBadge(s._score)+'</td>'
+      + '</tr>';
   }
 
-  function render(){
-    const visible=getVisible();
-    if(topN){
-      const sorted=visible.slice().sort((a,b)=>{
-        return topGood ? num(b.dataset.score)-num(a.dataset.score) : num(a.dataset.score)-num(b.dataset.score);
-      });
-      const show=sorted.slice(0,topN);
-      rows.forEach(r=>{ r.classList.toggle('row-hidden', !show.includes(r)); });
+  async function fetchSignals(){
+    const params = new URLSearchParams({
+      cap: state.cap,
+      sort: state.sort,
+      order: state.order,
+      signal_type: state.signal_type,
+      page: state.page,
+      per_page: state.per_page,
+    });
+    try {
+      const resp = await fetch('/api/signals?'+params);
+      const data = await resp.json();
+      renderTable(data);
+    } catch(e) {
+      console.error('Failed to fetch signals:', e);
     }
-    document.getElementById('rowCount').textContent=visible.length+' of '+rows.length+' signals';
   }
 
-  function updateHeaders(){
-    table.querySelectorAll('th.sortable').forEach(th=>{
+  function renderTable(data){
+    const sigs = data.signals || [];
+    const startIdx = (data.page - 1) * data.per_page;
+    $body.innerHTML = sigs.map((s,i) => rowHtml(s, startIdx + i + 1)).join('');
+    totalPages = data.pages;
+    $row.textContent = data.total + ' signals · Page ' + data.page + '/' + data.pages;
+    renderPagination(data.page, data.pages);
+    updateSortHeaders();
+  }
+
+  function renderPagination(page, pages){
+    if(pages <= 1){ $pg.innerHTML=''; return; }
+    let html = '<button class="filter-btn" data-page="1" '+(page===1?'disabled':'')+'>«</button>';
+    html += '<button class="filter-btn" data-page="'+(page-1)+'" '+(page===1?'disabled':'')+'>‹</button>';
+    const range = 2;
+    let start = Math.max(1, page - range);
+    let end = Math.min(pages, page + range);
+    if(start > 1) html += '<span style="color:var(--faint)">…</span>';
+    for(let i = start; i <= end; i++){
+      html += '<button class="filter-btn'+(i===page?' active':'')+'" data-page="'+i+'">'+i+'</button>';
+    }
+    if(end < pages) html += '<span style="color:var(--faint)">…</span>';
+    html += '<button class="filter-btn" data-page="'+(page+1)+'" '+(page===pages?'disabled':'')+'>›</button>';
+    html += '<button class="filter-btn" data-page="'+pages+'" '+(page===pages?'disabled':'')+'>»</button>';
+    $pg.innerHTML = html;
+  }
+
+  function updateSortHeaders(){
+    document.querySelectorAll('#signalTable th[data-sort]').forEach(th=>{
       th.classList.remove('sort-asc','sort-desc');
-      if(th.dataset.col===currentSort.col){
-        th.classList.add(currentSort.desc?'sort-desc':'sort-asc');
+      if(th.dataset.sort === state.sort){
+        th.classList.add(state.order==='desc'?'sort-desc':'sort-asc');
       }
     });
-    document.querySelectorAll('#filterBar .filter-btn').forEach(b=>b.classList.remove('active'));
   }
 
-  window.filterCap=function(cap){
-    currentCap=cap; topN=null;
-    updateHeaders();
-    const btns=document.querySelectorAll('#filterBar .filter-btn');
-    btns.forEach(b=>{ if(b.textContent.trim()===cap||(cap==='All'&&b.textContent.trim()==='All')) b.classList.add('active'); });
-    render();
-  };
-
-  window.sortTable=function(col,init){
-    if(!init && currentSort.col===col){ currentSort.desc=!currentSort.desc; }
-    else { currentSort.col=col; currentSort.desc=true; }
-    topN=null;
-    updateHeaders();
-    const btn=document.getElementById('sort'+col.charAt(0).toUpperCase()+col.slice(1).replace(/_([a-z])/g,(m,c)=>c.toUpperCase()));
-    if(btn) btn.classList.add('active');
-    const dir=currentSort.desc?-1:1;
-    const sorted=rows.slice().sort((a,b)=>{
-      let va,vb;
-      if(col==='score'){ va=num(a.dataset.score); vb=num(b.dataset.score); }
-      else if(col==='symbol'){ va=a.dataset.type||''; vb=b.dataset.type||''; }
-      else if(col==='market_cap_class'){ va=a.dataset.cap; vb=b.dataset.cap; }
-      else if(col==='signal_type'){ va=a.dataset.type; vb=b.dataset.type; }
-      else { va=num(a.querySelector('[data-val="'+col+'"]')?.dataset.val||0); vb=num(b.querySelector('[data-val="'+col+'"]')?.dataset.val||0); }
-      if(typeof va==='string') return va.localeCompare(vb)*dir;
-      return (va-vb)*dir;
+  function updateFilterButtons(){
+    document.querySelectorAll('#filterBar .filter-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('#filterBar .filter-btn[data-cap]').forEach(b=>{
+      if(b.dataset.cap === state.cap) b.classList.add('active');
     });
-    sorted.forEach(r=>table.appendChild(r));
-    render();
-  };
-
-  window.showTop=function(n,good){
-    topN=n; topGood=good;
-    updateHeaders();
-    const btn=document.getElementById('sortScore');
-    if(btn) btn.classList.add('active');
-    const visible=getVisible();
-    const sorted=visible.slice().sort((a,b)=>{
-      return good ? num(b.dataset.score)-num(a.dataset.score) : num(a.dataset.score)-num(b.dataset.score);
+    document.querySelectorAll('#filterBar .filter-btn[data-sort]').forEach(b=>{
+      if(b.dataset.sort === state.sort) b.classList.add('active');
     });
-    const show=new Set(sorted.slice(0,n));
-    rows.forEach(r=>{ r.classList.toggle('row-hidden', !show.has(r)); });
-    document.getElementById('rowCount').textContent=Math.min(n,visible.length)+' of '+rows.length+' signals (Top '+(good?'Good':'Bad')+')';
-  };
+  }
 
-  window.showAll=function(){
-    topN=null; currentCap='All';
-    updateHeaders();
-    document.querySelector('#filterBar .filter-btn').classList.add('active');
-    rows.forEach(r=>r.classList.remove('row-hidden'));
-    document.getElementById('rowCount').textContent=rows.length+' of '+rows.length+' signals';
-  };
+  function goToPage(p){
+    state.page = Math.max(1, Math.min(p, totalPages));
+    fetchSignals();
+  }
 
-  table.querySelectorAll('th.sortable').forEach(th=>{
-    th.addEventListener('click',function(){ sortTable(this.dataset.col,false); });
+  // Filter by cap
+  document.querySelectorAll('#filterBar .filter-btn[data-cap]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.cap = btn.dataset.cap;
+      state.page = 1;
+      topN = null;
+      updateFilterButtons();
+      fetchSignals();
+    });
   });
 
-  computeScores();
-  render();
-  sortTable('score',true);
+  // Sort
+  document.querySelectorAll('#filterBar .filter-btn[data-sort]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const col = btn.dataset.sort;
+      if(state.sort === col){
+        state.order = state.order === 'desc' ? 'asc' : 'desc';
+      } else {
+        state.sort = col;
+        state.order = 'desc';
+      }
+      state.page = 1;
+      topN = null;
+      updateFilterButtons();
+      fetchSignals();
+    });
+  });
+
+  // Table header sort
+  document.querySelectorAll('#signalTable th[data-sort]').forEach(th=>{
+    th.addEventListener('click', ()=>{
+      const col = th.dataset.sort;
+      if(state.sort === col){
+        state.order = state.order === 'desc' ? 'asc' : 'desc';
+      } else {
+        state.sort = col;
+        state.order = 'desc';
+      }
+      state.page = 1;
+      topN = null;
+      updateFilterButtons();
+      fetchSignals();
+    });
+  });
+
+  // Pagination
+  $pg.addEventListener('click', e=>{
+    const btn = e.target.closest('button[data-page]');
+    if(btn) goToPage(parseInt(btn.dataset.page));
+  });
+
+  // Actions: Top 20, Reset
+  document.querySelectorAll('#filterBar .filter-btn[data-action]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const action = btn.dataset.action;
+      if(action === 'reset'){
+        state.cap = 'All'; state.sort = 'score'; state.order = 'desc';
+        state.page = 1; topN = null;
+      } else if(action === 'top20good'){
+        state.sort = 'score'; state.order = 'desc'; state.page = 1;
+        topN = 20; topGood = true;
+      } else if(action === 'top20bad'){
+        state.sort = 'score'; state.order = 'asc'; state.page = 1;
+        topN = 20; topGood = false;
+      }
+      updateFilterButtons();
+      fetchSignals();
+    });
+  });
+
+  fetchSignals();
 })();
 </script>
 {% endblock %}
