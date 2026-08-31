@@ -283,6 +283,7 @@ def save_intermediate(
         symbol = sym_info.get("symbol", "")
         exchange = sym_info.get("exchange", "NSE")
         isin = sym_info.get("isin", "")
+        segment = sym_info.get("segment", "EQ")
         key = f"{exchange}|{symbol}"
 
         mcap_cr = None
@@ -318,9 +319,14 @@ def save_intermediate(
             tier = classify_by_value(mcap_cr)
             source = "yfinance"
 
+        # Override to SME for SME-segment stocks
+        if segment == "SME":
+            tier = "SME"
+
         results[key] = {
             "market_cap_cr": round(mcap_cr, 2) if mcap_cr else None,
             "market_cap_class": tier,
+            "segment": segment,
             "source": source,
         }
 
@@ -427,6 +433,7 @@ def main() -> int:
         symbol = sym_info.get("symbol", "")
         exchange = sym_info.get("exchange", "NSE")
         isin = sym_info.get("isin", "")
+        segment = sym_info.get("segment", "EQ")
         key = f"{exchange}|{symbol}"
 
         mcap_cr = None
@@ -462,9 +469,14 @@ def main() -> int:
             tier = classify_by_value(mcap_cr)
             source = "yfinance"
 
+        # Override to SME for SME-segment stocks
+        if segment == "SME":
+            tier = "SME"
+
         results[key] = {
             "market_cap_cr": round(mcap_cr, 2) if mcap_cr else None,
             "market_cap_class": tier,
+            "segment": segment,
             "source": source,
         }
 

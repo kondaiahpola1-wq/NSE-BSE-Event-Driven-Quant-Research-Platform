@@ -6,20 +6,27 @@
 <div class="sub" style="color:var(--faint);margin-bottom:16px">Data through {{ signals.date }} · {{ signals.total }} signals</div>
 
 <div class="section-title">Signals by Market Cap</div>
-<div class="grid grid-4">
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
   <div class="card"><div class="label">Large Cap</div><div class="value">{{ cap_counts.get('Large Cap', 0) }}</div></div>
   <div class="card"><div class="label">Mid Cap</div><div class="value">{{ cap_counts.get('Mid Cap', 0) }}</div></div>
   <div class="card"><div class="label">Small Cap</div><div class="value">{{ cap_counts.get('Small Cap', 0) }}</div></div>
+  <div class="card"><div class="label">SME</div><div class="value" style="color:var(--cyan,#00bcd4)">{{ cap_counts.get('SME', 0) }}</div></div>
   <div class="card"><div class="label">Other</div><div class="value">{{ cap_counts.get('Other', 0) + cap_counts.get('Micro Cap', 0) }}</div></div>
 </div>
 
 <div class="filter-bar" id="filterBar">
-  <span style="color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:1px">Filter:</span>
+  <span style="color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:1px">Cap:</span>
   <button class="filter-btn active" data-cap="All">All</button>
   <button class="filter-btn" data-cap="Large Cap">Large Cap</button>
   <button class="filter-btn" data-cap="Mid Cap">Mid Cap</button>
   <button class="filter-btn" data-cap="Small Cap">Small Cap</button>
+  <button class="filter-btn" data-cap="SME">SME</button>
   <button class="filter-btn" data-cap="Other">Other</button>
+  <div class="filter-sep"></div>
+  <span style="color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:1px">Segment:</span>
+  <button class="filter-btn active" data-segment="All">All</button>
+  <button class="filter-btn" data-segment="EQ">EQ</button>
+  <button class="filter-btn" data-segment="SME">SME</button>
   <div class="filter-sep"></div>
   <span style="color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:1px">Sort:</span>
   <button class="filter-btn active" data-sort="score" id="sortScore">Score ▼</button>
@@ -63,7 +70,7 @@
 
 <script>
 (function(){
-  const state = { page:1, per_page:50, cap:'All', sort:'score', order:'desc', signal_type:'All' };
+  const state = { page:1, per_page:50, cap:'All', sort:'score', order:'desc', signal_type:'All', segment:'All' };
   let totalPages = 0;
   let topN = null, topGood = true;
 
@@ -112,6 +119,7 @@
       sort: state.sort,
       order: state.order,
       signal_type: state.signal_type,
+      segment: state.segment,
       page: state.page,
       per_page: state.per_page,
     });
@@ -165,6 +173,9 @@
     document.querySelectorAll('#filterBar .filter-btn[data-cap]').forEach(b=>{
       if(b.dataset.cap === state.cap) b.classList.add('active');
     });
+    document.querySelectorAll('#filterBar .filter-btn[data-segment]').forEach(b=>{
+      if(b.dataset.segment === state.segment) b.classList.add('active');
+    });
     document.querySelectorAll('#filterBar .filter-btn[data-sort]').forEach(b=>{
       if(b.dataset.sort === state.sort) b.classList.add('active');
     });
@@ -179,6 +190,17 @@
   document.querySelectorAll('#filterBar .filter-btn[data-cap]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       state.cap = btn.dataset.cap;
+      state.page = 1;
+      topN = null;
+      updateFilterButtons();
+      fetchSignals();
+    });
+  });
+
+  // Filter by segment
+  document.querySelectorAll('#filterBar .filter-btn[data-segment]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      state.segment = btn.dataset.segment;
       state.page = 1;
       topN = null;
       updateFilterButtons();
@@ -231,7 +253,7 @@
     btn.addEventListener('click', ()=>{
       const action = btn.dataset.action;
       if(action === 'reset'){
-        state.cap = 'All'; state.sort = 'score'; state.order = 'desc';
+        state.cap = 'All'; state.segment = 'All'; state.sort = 'score'; state.order = 'desc';
         state.page = 1; topN = null;
       } else if(action === 'top20good'){
         state.sort = 'score'; state.order = 'desc'; state.page = 1;

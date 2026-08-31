@@ -102,6 +102,7 @@ def get_signals_for_api(
     sort: str = "score",
     order: str = "desc",
     signal_type: str = "All",
+    segment: str = "All",
     page: int = 1,
     per_page: int = 50,
 ) -> dict[str, Any]:
@@ -118,9 +119,13 @@ def get_signals_for_api(
     # Compute scores if not present
     _ensure_scores(all_signals)
 
-    # Filter by market cap
+    # Filter by market cap (supports "SME" as a valid value)
     if cap and cap != "All":
         all_signals = [s for s in all_signals if s.get("market_cap_class") == cap]
+
+    # Filter by segment (EQ/SME/All)
+    if segment and segment != "All":
+        all_signals = [s for s in all_signals if s.get("segment") == segment]
 
     # Filter by signal type
     if signal_type and signal_type != "All":

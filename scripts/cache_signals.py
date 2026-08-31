@@ -407,8 +407,13 @@ def main() -> int:
                 )
         print(f"BSE done: {bse_count} signals ({time.time() - t0:.0f}s)", flush=True)
 
-    # Classify all signals by market cap
+    # Classify all signals by market cap (SME override applied inside classify_signals)
     signals = classify_signals_mcap(signals, router)
+
+    # Safety net: ensure SME-segment stocks are classified as "SME"
+    for s in signals:
+        if s.get("segment") == "SME" and s.get("market_cap_class") != "SME":
+            s["market_cap_class"] = "SME"
 
     # enrich MCP corporate actions (skipped — MCP NSE API blocked from datacenter IPs)
     # signals = enrich_with_corporate_actions(signals, router)
