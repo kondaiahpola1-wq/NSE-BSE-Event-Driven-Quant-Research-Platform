@@ -39,3 +39,6 @@ upstox_tokens.json
 # Deploy automation credentials
 scripts/deploy_setup/.credentials.env
 scripts/deploy_setup/.cookies_*.txt
+scripts/deploy_setup/accounts.json
+scripts/deploy_setup/downloaded_files/
+scripts/deploy_setup/latest_logs/
