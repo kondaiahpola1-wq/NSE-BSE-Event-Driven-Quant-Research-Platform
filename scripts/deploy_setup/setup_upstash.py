@@ -1,188 +1,122 @@
-"""Upstash Redis full setup — account creation + database setup.
+"""Upstash Redis setup — Phase 2: Login + create Redis database + extract URL.
 
-1. Creates a temp email via mail.tm
-2. Signs up on upstash.com using SeleniumBase UC mode
-3. Polls temp email for verification link
-4. Clicks verification link
-5. Creates a Redis database
-6. Extracts the Redis URL
+Reads credentials from accounts.json (created by create_accounts.py).
+Uses saved cookies for session reuse.
 """
 
 from __future__ import annotations
 
-import contextlib
+import json
 import re
+from contextlib import suppress
 from pathlib import Path
 
 from seleniumbase import SB
-from temp_email import create_email, wait_for_code, wait_for_verification
 
 COOKIES_FILE = Path(__file__).parent / ".cookies_upstash.txt"
+ACCOUNTS_FILE = Path(__file__).parent / "accounts.json"
 
 
-def setup_upstash(full_name: str = "NSE Quant") -> tuple[str, str, str]:
-    """Full automated Upstash setup.
+def _load_credentials() -> tuple[str, str]:
+    """Load Upstash credentials from accounts.json."""
+    if ACCOUNTS_FILE.exists():
+        accounts = json.loads(ACCOUNTS_FILE.read_text())
+        if "upstash" in accounts:
+            return accounts["upstash"]["email"], accounts["upstash"]["password"]
+
+    print("  No saved Upstash credentials found.")
+    email = input("  Upstash email: ").strip()
+    password = input("  Upstash password: ").strip()
+    return email, password
+
+
+def setup_upstash(db_name: str = "nse-bse-quant") -> tuple[str, str, str]:
+    """Login to Upstash, create Redis database, extract URL.
 
     Returns:
         (email, password, redis_url)
     """
-    password = "QuantDeploy2026!"
+    email, password = _load_credentials()
 
-    # Step 1: Create temp email
-    print("  [1/5] Creating temp email...")
-    email, token = create_email("upstashquant")
-    print(f"  [✓] Email: {email}")
+    print(f"  [1/3] Logging in as {email}...")
+    redis_url = _create_redis_db(email, password, db_name)
 
-    # Step 2: Sign up on Upstash
-    print("  [2/5] Signing up on upstash.com...")
-    with SB(uc=True, test=True, headless=True) as sb:
-        sb.goto("https://upstash.com/signup")
-        sb.sleep(3)
-
-        # Fill signup form
-        sb.type('input[name="name"], input[placeholder*="name"]', full_name)
-        sb.sleep(0.3)
-        sb.type('input[type="email"], input[name="email"]', email)
-        sb.sleep(0.3)
-        sb.type('input[type="password"], input[name="password"]', password)
-        sb.sleep(0.3)
-
-        # Accept terms if checkbox
-        with contextlib.suppress(Exception):
-            sb.click('input[type="checkbox"]', timeout=3)
-
-        sb.click('button[type="submit"], button:contains("Sign up"), button:contains("Create")')
-        sb.sleep(5)
-
-        # Handle CAPTCHA/challenge
-        if sb.is_element_present("iframe"):
-            sb.sleep(10)
-
-    # Step 3: Poll for verification
-    print("  [3/5] Waiting for verification email (max 5 min)...")
-    verify_url = wait_for_verification(token, timeout=300, poll_interval=5)
-
-    if not verify_url:
-        otp = wait_for_code(token, timeout=300, poll_interval=5)
-        if otp:
-            print(f"  [✓] Got OTP: {otp}")
-            with SB(uc=True, test=True, headless=True) as sb:
-                if COOKIES_FILE.exists():
-                    sb.load_cookies(str(COOKIES_FILE))
-                sb.goto("https://upstash.com/signin")
-                sb.sleep(3)
-                sb.type('input[type="email"]', email)
-                sb.type('input[type="password"]', password)
-                sb.click('button[type="submit"]')
-                sb.sleep(3)
-                # Look for OTP input
-                sb.type('input[name="code"], input[placeholder*="code"]', otp)
-                sb.click('button[type="submit"]')
-                sb.sleep(3)
-        else:
-            print("  [✗] No verification email received")
-            raise RuntimeError("Email verification failed")
-
-    # Step 4: Click verification link
-    if verify_url and verify_url.startswith("http"):
-        print("  [4/5] Clicking verification link...")
-        with SB(uc=True, test=True, headless=True) as sb:
-            sb.goto(verify_url)
-            sb.sleep(5)
-
-            if sb.is_element_present('input[type="password"]'):
-                sb.type('input[type="password"]', password)
-                with contextlib.suppress(Exception):
-                    sb.click('button[type="submit"]')
-                sb.sleep(3)
-
-            sb.save_cookies(str(COOKIES_FILE))
+    if redis_url:
+        print("  [✓] Redis URL obtained")
     else:
-        print("  [4/5] Verification done via OTP")
-
-    # Step 5: Login and create Redis database
-    print("  [5/5] Creating Upstash Redis database...")
-    redis_url = _create_redis_db(email, password)
-
-    print("  [✓] Upstash setup complete")
-    print(f"  [✓] Email: {email}")
-    print(f"  [✓] Redis URL: {redis_url[:40]}...")
+        print("  [!] Could not extract Redis URL")
 
     return email, password, redis_url
 
 
-def _create_redis_db(email: str, password: str) -> str:
-    """Login to Upstash and create a Redis database."""
+def _create_redis_db(email: str, password: str, db_name: str) -> str:
+    """Login to Upstash, create/select Redis database, return URL."""
     with SB(uc=True, test=True, headless=True) as sb:
         if COOKIES_FILE.exists():
             sb.load_cookies(str(COOKIES_FILE))
 
-        sb.goto("https://upstash.com/signin")
-        sb.sleep(3)
+        sb.goto("https://console.upstash.com/login")
+        sb.sleep(8)
 
-        if "signin" in sb.get_current_url() or sb.is_text_visible("Sign in"):
-            sb.type('input[type="email"], input[name="email"]', email)
-            sb.sleep(0.3)
-            sb.type('input[type="password"], input[name="password"]', password)
-            sb.sleep(0.3)
-            sb.click('button[type="submit"]')
-            sb.sleep(5)
+        # Login if needed
+        current_url = sb.get_current_url()
+        if "login" in current_url:
+            with suppress(Exception):
+                sb.type('input[type="email"], input[name="email"]', email, timeout=5)
+                sb.sleep(0.3)
+            with suppress(Exception):
+                sb.type('input[type="password"], input[name="password"]', password, timeout=3)
+                sb.sleep(0.3)
+            with suppress(Exception):
+                sb.click('button[type="submit"], button:contains("Sign in")', timeout=5)
+            sb.sleep(8)
 
         sb.save_cookies(str(COOKIES_FILE))
 
-        # Navigate to Redis page
+        # Navigate to Redis
         sb.goto("https://console.upstash.com/redis")
-        sb.sleep(3)
+        sb.sleep(5)
 
         # Check if database exists
-        if sb.is_text_visible("nse-bse-quant"):
-            # Click existing database
-            sb.click('text="nse-bse-quant"')
+        if sb.is_text_visible(db_name):
+            sb.click(f'text="{db_name}"')
             sb.sleep(3)
         else:
             # Create new database
-            sb.click('button:contains("Create Database"), button:contains("New Database")')
+            with suppress(Exception):
+                sb.click('button:contains("Create Database"), button:contains("New")', timeout=5)
             sb.sleep(2)
 
-            name_input = sb.find_element('input[name="name"], input[placeholder*="name"]')
-            name_input.clear()
-            sb.type('input[name="name"], input[placeholder*="name"]', "nse-bse-quant")
-            sb.sleep(0.5)
+            with suppress(Exception):
+                name_input = sb.find_element('input[name="name"], input[placeholder*="name"]', timeout=5)
+                name_input.clear()
+                sb.type('input[name="name"], input[placeholder*="name"]', db_name)
 
-            # Select region (closest to India)
-            with contextlib.suppress(Exception):
+            with suppress(Exception):
                 sb.select_option_by_text('select[name="region"], select', "ap-south-1 (Mumbai)")
 
-            sb.click('button:contains("Create"), button[type="submit"]')
+            with suppress(Exception):
+                sb.click('button:contains("Create"), button[type="submit"]', timeout=5)
             sb.sleep(5)
 
-        # Extract Redis URL
-        redis_url = _extract_redis_url(sb)
-        return redis_url
+        return _extract_redis_url(sb)
 
 
 def _extract_redis_url(sb: SB) -> str:
     """Extract Redis URL from Upstash dashboard."""
     selectors = [
-        'code',
-        'pre',
-        'input[readonly]',
-        '[data-clipboard-text]',
-        '[class*="connection"]',
-        '[class*="url"]',
+        'code', 'pre', 'input[readonly]',
+        '[data-clipboard-text]', '[class*="connection"]', '[class*="url"]',
     ]
 
     for sel in selectors:
-        try:
+        with suppress(Exception):
             elements = sb.find_elements(sel)
             for el in elements:
                 txt = el.get_attribute("data-clipboard-text") or el.text or el.get_attribute("value") or ""
                 if "rediss://" in txt or "redis://" in txt:
                     return txt.strip()
-        except Exception:
-            continue
 
-    # Regex fallback
     source = sb.get_page_source()
     match = re.search(r'rediss?://[^\s"<>\'&]+', source)
     if match:

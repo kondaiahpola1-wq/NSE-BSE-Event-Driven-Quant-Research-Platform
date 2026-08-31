@@ -6,7 +6,9 @@ No API key required — fully free.
 
 from __future__ import annotations
 
+import random
 import re
+import string
 import time
 
 import httpx
@@ -40,6 +42,10 @@ def create_email(
     domain = _get_domain(client)
     if prefix is None:
         prefix = f"quant{int(time.time())}"
+    elif not any(c.isdigit() for c in prefix):
+        # Add random suffix to avoid collisions
+        suffix = "".join(random.choices(string.digits, k=4))
+        prefix = f"{prefix}{suffix}"
 
     address = f"{prefix}@{domain}"
 

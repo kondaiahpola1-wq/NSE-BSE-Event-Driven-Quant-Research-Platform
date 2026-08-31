@@ -1,141 +1,82 @@
-"""Neon PostgreSQL full setup — account creation + project setup.
+"""Neon PostgreSQL setup — Phase 2: Login + create project + extract DSN.
 
-1. Creates a temp email via mail.tm
-2. Signs up on neon.tech using SeleniumBase UC mode
-3. Polls temp email for verification link
-4. Clicks verification link
-5. Logs in and creates a project
-6. Extracts the PostgreSQL connection string
+Reads credentials from accounts.json (created by create_accounts.py).
+Uses saved cookies for session reuse.
 """
 
 from __future__ import annotations
 
-import contextlib
+import json
 import re
+from contextlib import suppress
 from pathlib import Path
 
 from seleniumbase import SB
-from temp_email import create_email, wait_for_code, wait_for_verification
 
 COOKIES_FILE = Path(__file__).parent / ".cookies_neon.txt"
+ACCOUNTS_FILE = Path(__file__).parent / "accounts.json"
 
 
-def setup_neon(full_name: str = "NSE Quant") -> tuple[str, str, str]:
-    """Full automated Neon setup.
+def _load_credentials() -> tuple[str, str]:
+    """Load Neon credentials from accounts.json."""
+    if ACCOUNTS_FILE.exists():
+        accounts = json.loads(ACCOUNTS_FILE.read_text())
+        if "neon" in accounts:
+            return accounts["neon"]["email"], accounts["neon"]["password"]
+
+    # Fallback: ask user
+    print("  No saved Neon credentials found.")
+    email = input("  Neon email: ").strip()
+    password = input("  Neon password: ").strip()
+    return email, password
+
+
+def setup_neon(project_name: str = "nse-bse-quant") -> tuple[str, str, str]:
+    """Login to Neon, create project, extract DSN.
 
     Returns:
-        (email_address, password, connection_string)
+        (email, password, connection_string)
     """
-    password = "QuantDeploy2026!"
+    email, password = _load_credentials()
 
-    # Step 1: Create temp email
-    print("  [1/5] Creating temp email...")
-    email, token = create_email("neonquant")
-    print(f"  [✓] Email: {email}")
+    print(f"  [1/3] Logging in as {email}...")
+    neon_dsn = _create_project(email, password, project_name)
 
-    # Step 2: Sign up on Neon
-    print("  [2/5] Signing up on neon.tech...")
-    with SB(uc=True, test=True, headless=True) as sb:
-        sb.goto("https://console.neon.tech/sign_up")
-        sb.sleep(3)
-
-        # Fill signup form
-        sb.type('input[name="name"], input[placeholder*="name"], input[name="full_name"]', full_name)
-        sb.sleep(0.3)
-        sb.type('input[type="email"], input[name="email"]', email)
-        sb.sleep(0.3)
-        sb.type('input[type="password"], input[name="password"]', password)
-        sb.sleep(0.3)
-
-        # Accept terms if checkbox present
-        with contextlib.suppress(Exception):
-            sb.click('input[type="checkbox"]', timeout=3)
-
-        # Submit
-        sb.click('button[type="submit"], button:contains("Sign up"), button:contains("Create")')
-        sb.sleep(5)
-
-        # Handle potential Cloudflare/Turnstile challenge
-        if sb.is_text_visible("Verify") or sb.is_element_present("iframe"):
-            sb.sleep(10)
-
-    # Step 3: Poll for verification email
-    print("  [3/5] Waiting for verification email (max 5 min)...")
-    verify_url = wait_for_verification(token, timeout=300, poll_interval=5)
-
-    if not verify_url:
-        # Try waiting for OTP code instead
-        print("  [!] No link found, trying OTP code...")
-        otp = wait_for_code(token, timeout=300, poll_interval=5)
-        if otp:
-            print(f"  [✓] Got OTP: {otp}")
-            # Enter OTP in the browser
-            with SB(uc=True, test=True, headless=True) as sb:
-                if COOKIES_FILE.exists():
-                    sb.load_cookies(str(COOKIES_FILE))
-                sb.goto("https://console.neon.tech/sign_up")
-                sb.sleep(3)
-                # Try to find OTP input
-                sb.type('input[name="code"], input[placeholder*="code"]', otp)
-                sb.click('button[type="submit"], button:contains("Verify")')
-                sb.sleep(5)
-        else:
-            print("  [✗] No verification email received")
-            raise RuntimeError("Email verification failed")
-
-    # Step 4: Click verification link
-    if verify_url and verify_url.startswith("http"):
-        print("  [4/5] Clicking verification link...")
-        with SB(uc=True, test=True, headless=True) as sb:
-            sb.goto(verify_url)
-            sb.sleep(5)
-
-            # Set password if required
-            if sb.is_element_present('input[type="password"]'):
-                sb.type('input[type="password"]', password)
-                sb.sleep(0.3)
-                with contextlib.suppress(Exception):
-                    sb.click('button[type="submit"]')
-                sb.sleep(3)
-
-            sb.save_cookies(str(COOKIES_FILE))
+    if neon_dsn:
+        print("  [✓] DSN obtained")
     else:
-        print("  [4/5] Verification done via OTP")
-
-    # Step 5: Login and create project
-    print("  [5/5] Creating Neon project...")
-    neon_dsn = _create_project(email, password, "nse-bse-quant")
-
-    print("  [✓] Neon setup complete")
-    print(f"  [✓] Email: {email}")
-    print(f"  [✓] DSN: {neon_dsn[:50]}...")
+        print("  [!] Could not extract DSN")
 
     return email, password, neon_dsn
 
 
 def _create_project(email: str, password: str, project_name: str) -> str:
-    """Login to Neon and create a project, return connection string."""
+    """Login to Neon, create/select project, return connection string."""
     with SB(uc=True, test=True, headless=True) as sb:
         if COOKIES_FILE.exists():
             sb.load_cookies(str(COOKIES_FILE))
 
         sb.goto("https://console.neon.tech/signin")
-        sb.sleep(3)
+        sb.sleep(10)
 
         # Login if needed
-        if "signin" in sb.get_current_url() or sb.is_text_visible("Sign in"):
-            sb.type('input[type="email"], input[name="email"]', email)
-            sb.sleep(0.3)
-            sb.type('input[type="password"], input[name="password"]', password)
-            sb.sleep(0.3)
-            sb.click('button[type="submit"]')
-            sb.sleep(5)
+        current_url = sb.get_current_url()
+        if "signin" in current_url or "realms" in current_url:
+            with suppress(Exception):
+                sb.type('input[name="email"]', email, timeout=5)
+                sb.sleep(0.3)
+            with suppress(Exception):
+                sb.type('input[name="password"]', password, timeout=3)
+                sb.sleep(0.3)
+            with suppress(Exception):
+                sb.click('button:contains("Continue"), button[type="submit"]', timeout=5)
+            sb.sleep(10)
 
         sb.save_cookies(str(COOKIES_FILE))
 
         # Go to projects
         sb.goto("https://console.neon.tech/app/projects")
-        sb.sleep(3)
+        sb.sleep(5)
 
         # Check if project exists
         if sb.is_text_visible(project_name):
@@ -143,64 +84,44 @@ def _create_project(email: str, password: str, project_name: str) -> str:
             sb.sleep(3)
         else:
             # Create project
-            try:
-                sb.click('button:contains("Create project"), a:contains("Create project")')
-            except Exception:
-                sb.click('a[href*="create"], button:contains("New")')
+            with suppress(Exception):
+                sb.click('button:contains("Create project"), a:contains("Create project")', timeout=5)
+            with suppress(Exception):
+                sb.click('a[href*="create"], button:contains("New")', timeout=3)
             sb.sleep(2)
 
-            name_input = sb.find_element('input[name="name"], input[placeholder*="project"]')
-            name_input.clear()
-            sb.type('input[name="name"], input[placeholder*="project"]', project_name)
-            sb.sleep(0.5)
-            sb.click('button:contains("Create"), button[type="submit"]')
+            with suppress(Exception):
+                name_input = sb.find_element('input[name="name"], input[placeholder*="project"]', timeout=5)
+                name_input.clear()
+                sb.type('input[name="name"], input[placeholder*="project"]', project_name)
+                sb.sleep(0.5)
+
+            with suppress(Exception):
+                sb.click('button:contains("Create"), button[type="submit"]', timeout=5)
             sb.sleep(5)
 
-        # Get connection string
-        connection_string = _extract_connection_string(sb)
-
-        if not connection_string:
-            # Try the dashboard URL approach
-            sb.goto("https://console.neon.tech/app/projects")
-            sb.sleep(2)
-            if sb.is_text_visible(project_name):
-                sb.click(f'text="{project_name}"')
-                sb.sleep(3)
-                connection_string = _extract_connection_string(sb)
-
-        return connection_string
+        return _extract_connection_string(sb)
 
 
 def _extract_connection_string(sb: SB) -> str:
     """Extract PostgreSQL connection string from Neon dashboard."""
-    # Try connect button
-    try:
+    with suppress(Exception):
         sb.click('button:contains("Connect"), [data-testid="connect-button"]', timeout=5)
         sb.sleep(2)
-    except Exception:
-        pass
 
-    # Try to find connection string in various places
     selectors = [
-        'code',
-        'pre',
-        '.connection-string',
-        '[class*="connection"]',
-        '[data-clipboard-text]',
-        'input[readonly]',
+        'code', 'pre', '.connection-string',
+        '[class*="connection"]', '[data-clipboard-text]', 'input[readonly]',
     ]
 
     for sel in selectors:
-        try:
+        with suppress(Exception):
             elements = sb.find_elements(sel)
             for el in elements:
                 txt = el.get_attribute("data-clipboard-text") or el.text or el.get_attribute("value") or ""
                 if "postgresql://" in txt:
                     return txt.strip()
-        except Exception:
-            continue
 
-    # Last resort: regex on page source
     source = sb.get_page_source()
     match = re.search(r'postgresql://[^\s"<>\'&]+', source)
     if match:
