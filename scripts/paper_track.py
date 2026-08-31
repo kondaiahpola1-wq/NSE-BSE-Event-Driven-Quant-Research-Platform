@@ -34,6 +34,8 @@ def _scan_today(settings) -> pd.DataFrame:
         if frame is None:
             continue
         frame = add_features(frame)
+        if frame is None or frame.empty:
+            continue
         last = frame.iloc[-1]
         rows.append({
             "symbol": str(last["symbol"]),
