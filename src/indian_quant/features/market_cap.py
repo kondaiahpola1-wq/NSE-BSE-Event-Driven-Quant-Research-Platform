@@ -112,22 +112,31 @@ def classify_signals(signals: list[dict], router: Any | None = None) -> list[dic
         exchange = s.get("exchange", "NSE")
         key = f"{exchange}|{symbol}"
 
+        # Try direct match first, then try the other exchange
         if key in cache:
             entry = cache[key]
             s["market_cap_cr"] = entry.get("market_cap_cr")
             s["market_cap_class"] = entry.get("market_cap_class", "Unknown")
             cache_hits += 1
-        elif cache and not has_cache:
-            # Only call router if no disk cache exists (slow)
-            info = get_market_cap(router, symbol, exchange, cache)
-            s["market_cap_cr"] = info["market_cap_cr"]
-            s["market_cap_class"] = info["market_cap_class"]
-            fetched += 1
         else:
-            # Cache miss but cache file exists — mark Other
-            s["market_cap_cr"] = None
-            s["market_cap_class"] = "Other"
-            cache_misses += 1
+            # Try other exchange (BSE stocks might be cached under BSE|symbol)
+            other_key = f"BSE|{symbol}" if exchange == "NSE" else f"NSE|{symbol}"
+            if other_key in cache:
+                entry = cache[other_key]
+                s["market_cap_cr"] = entry.get("market_cap_cr")
+                s["market_cap_class"] = entry.get("market_cap_class", "Unknown")
+                cache_hits += 1
+            elif cache and not has_cache:
+                # Only call router if no disk cache exists (slow)
+                info = get_market_cap(router, symbol, exchange, cache)
+                s["market_cap_cr"] = info["market_cap_cr"]
+                s["market_cap_class"] = info["market_cap_class"]
+                fetched += 1
+            else:
+                # Cache miss but cache file exists — mark Other
+                s["market_cap_cr"] = None
+                s["market_cap_class"] = "Other"
+                cache_misses += 1
 
     if fetched > 0:
         save_mcap_cache(cache)
