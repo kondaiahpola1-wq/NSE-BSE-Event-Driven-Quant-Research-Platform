@@ -163,13 +163,14 @@ def get_signals_for_api(
         "deliv_pct", "deliv_z", "ret_1d_pct", "rsi",
         "entry_zone_low", "entry_zone_high", "stop_loss", "target_price",
         "market_cap_cr", "market_cap_class", "_score",
+        "conviction_score", "kelly_fraction",
     ]
     page_signals = []
     for s in all_signals[start:end]:
         row = {f: s.get(f) for f in fields}
         for f in ["close", "deliv_pct", "deliv_z", "ret_1d_pct", "rsi",
                    "entry_zone_low", "entry_zone_high", "stop_loss", "target_price",
-                   "market_cap_cr", "_score"]:
+                   "market_cap_cr", "_score", "conviction_score", "kelly_fraction"]:
             v = row.get(f)
             if v is not None:
                 try:
@@ -203,13 +204,16 @@ def _ensure_scores(signals: list[dict]) -> None:
     z_vals = []
     d_vals = []
     r_vals = []
+    v_vals = []
     for s in signals:
         z = _safe(s.get("deliv_z"))
         d = _safe(s.get("deliv_pct"))
         r = _safe(s.get("ret_1d_pct"))
+        v = _safe(s.get("vol_z"))
         z_vals.append(z if z is not None else 0)
         d_vals.append(d if d is not None else 0)
         r_vals.append(r if r is not None else 0)
+        v_vals.append(v if v is not None else 0)
 
     if signals and "_score" in signals[0]:
         return
@@ -217,16 +221,46 @@ def _ensure_scores(signals: list[dict]) -> None:
     z_min, z_max = min(z_vals), max(z_vals)
     d_min, d_max = min(d_vals), max(d_vals)
     r_min, r_max = min(r_vals), max(r_vals)
+    v_min, v_max = min(v_vals), max(v_vals)
 
     z_range = z_max - z_min or 1
     d_range = d_max - d_min or 1
     r_range = r_max - r_min or 1
+    v_range = v_max - v_min or 1
 
     for i, s in enumerate(signals):
         zn = (z_vals[i] - z_min) / z_range
         dn = (d_vals[i] - d_min) / d_range
         rn = (r_vals[i] - r_min) / r_range
+        vn = (v_vals[i] - v_min) / v_range
         s["_score"] = round(zn * 0.50 + dn * 0.30 + rn * 0.20, 4)
+
+        # Conviction score: 40% deliv_z + 30% momentum + 20% volume + 10% technicals
+        dz_n = min(abs(z_vals[i]) / 5.0, 1.0) * 0.40
+        mom = min(max(r_vals[i] / 3.0, 0.0), 1.0) * 0.30
+        vol = min(max(v_vals[i] / 2.0, 0.0), 1.0) * 0.20
+        rsi = _safe(s.get("rsi")) or 50.0
+        macd_h = _safe(s.get("macd_hist")) or 0.0
+        close = _safe(s.get("close")) or 0.0
+        sma20 = _safe(s.get("sma_20")) or close
+        tech = 0.0
+        if 40 <= rsi <= 65:
+            tech += 0.4
+        elif 30 <= rsi <= 75:
+            tech += 0.2
+        if macd_h > 0:
+            tech += 0.3
+        if close > sma20 and sma20 > 0:
+            tech += 0.3
+        tech *= 0.10
+        s["conviction_score"] = round(dz_n + mom + vol + tech, 4)
+
+        # Kelly fraction (half-Kelly, using default params)
+        p = 0.43
+        b = 250.0 / 165.0
+        q = 1.0 - p
+        full_kelly = (p * b - q) / b
+        s["kelly_fraction"] = round(max(full_kelly * 0.5, 0.0), 6)
 
 
 def get_cached_signal_for_symbol(symbol: str) -> dict[str, Any] | None:

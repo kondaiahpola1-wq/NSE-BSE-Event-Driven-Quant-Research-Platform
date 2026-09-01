@@ -67,6 +67,8 @@
   <th>Days</th>
   <th>Return %</th>
   <th>Net BPS</th>
+  <th>Conviction</th>
+  <th>Kelly %</th>
   <th>Exit Reason</th>
 </tr>
 {% for t in trades %}
@@ -84,6 +86,8 @@
   <td>{{ t.days_held or '—' }}</td>
   <td class="{% if t.return_pct and t.return_pct > 0 %}good{% elif t.return_pct and t.return_pct < 0 %}bad{% endif %} mono">{% if t.return_pct is not none %}{{ '%+.1f'|format(t.return_pct) }}%{% else %}—{% endif %}</td>
   <td class="{% if t.realized_net_bps and t.realized_net_bps > 0 %}good{% elif t.realized_net_bps and t.realized_net_bps < 0 %}bad{% endif %} mono">{% if t.realized_net_bps is not none %}{{ '%+.0f'|format(t.realized_net_bps) }}bps{% else %}—{% endif %}</td>
+  <td class="mono" style="font-size:12px">{% if t.conviction_score %}{{ '%.3f'|format(t.conviction_score) }}{% else %}—{% endif %}</td>
+  <td class="mono" style="font-size:12px">{% if t.kelly_fraction %}{{ '%.2f'|format(t.kelly_fraction * 100) }}%{% else %}—{% endif %}</td>
   <td>{% if t.exit_reason %}<span class="badge {% if t.exit_reason == 'STOP' %}badge-red{% else %}badge-green{% endif %}">{{ t.exit_reason }}</span>{% endif %}</td>
 </tr>
 {% endfor %}
