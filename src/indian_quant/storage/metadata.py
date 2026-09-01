@@ -208,6 +208,8 @@ class MetadataStore:
             "exit_reason": "TEXT",
             "max_drawdown_bps": "REAL",
             "peak_return_bps": "REAL",
+            "conviction_score": "REAL DEFAULT 0",
+            "kelly_fraction": "REAL DEFAULT 0",
         }
         for col, typedef in new_cols.items():
             if col not in existing:
@@ -227,6 +229,8 @@ class MetadataStore:
             "exit_reason": "TEXT",
             "max_drawdown_bps": "REAL",
             "peak_return_bps": "REAL",
+            "conviction_score": "REAL DEFAULT 0",
+            "kelly_fraction": "REAL DEFAULT 0",
         }
         for col, typedef in new_cols2.items():
             if col not in existing2:
@@ -326,17 +330,20 @@ class MetadataStore:
                             position_value: float = 0.0,
                             risk_amount: float = 0.0,
                             horizon_label: str = "10d",
-                            capital_allocated: float = 0.0) -> int:
+                            capital_allocated: float = 0.0,
+                            conviction_score: float = 0.0,
+                            kelly_fraction: float = 0.0) -> int:
         cur = self._con.execute(
             """INSERT INTO paper_signals
                (created_at, symbol, segment, side, close_at_signal, qty,
                 horizon_days, stop_pct, status, note,
-                entry_date, position_value, risk_amount, horizon_label, capital_allocated)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?)""",
+                entry_date, position_value, risk_amount, horizon_label,
+                capital_allocated, conviction_score, kelly_fraction)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)""",
             (_now(), symbol.upper(), segment, side, close_at_signal, qty,
              horizon_days, stop_pct, note,
              entry_date or _now()[:10], position_value, risk_amount,
-             horizon_label, capital_allocated),
+             horizon_label, capital_allocated, conviction_score, kelly_fraction),
         )
         self._con.commit()
         return int(cur.lastrowid or 0)
@@ -416,19 +423,22 @@ class MetadataStore:
                                 stop_loss: float, target_price: float,
                                 horizon_days: int, qty: int,
                                 predicted_return_bps: float | None = None,
-                                note: str | None = None) -> int:
+                                note: str | None = None,
+                                conviction_score: float = 0.0,
+                                kelly_fraction: float = 0.0) -> int:
         cur = self._con.execute(
             """INSERT INTO daily_suggestions
                (suggestion_date, symbol, segment, signal_type, direction,
                 close_at_signal, deliv_pct, deliv_z, vol_z,
                 entry_zone_low, entry_zone_high, stop_loss, target_price,
                 horizon_days, qty_suggested, status,
-                predicted_return_bps, note)
-               VALUES (?, ?, ?, ?, 'BUY', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)""",
+                predicted_return_bps, note, conviction_score, kelly_fraction)
+               VALUES (?, ?, ?, ?, 'BUY', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)""",
             (suggestion_date, symbol.upper(), segment, signal_type,
              close_at_signal, deliv_pct, deliv_z, vol_z,
              entry_zone_low, entry_zone_high, stop_loss, target_price,
-             horizon_days, qty, predicted_return_bps, note),
+             horizon_days, qty, predicted_return_bps, note,
+             conviction_score, kelly_fraction),
         )
         self._con.commit()
         return int(cur.lastrowid or 0)

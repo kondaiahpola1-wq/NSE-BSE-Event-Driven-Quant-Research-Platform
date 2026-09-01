@@ -20,9 +20,14 @@ from indian_quant.features.delivery import (
     SIGNAL_NAMES,
     add_features,
     cluster_entry_mask,
+    conviction_score,
+    horizon_fit,
+    HORIZON_DAYS,
+    HORIZON_STOP,
     prepare_frame,
     signal_mask,
 )
+from indian_quant.portfolio.kelly import kelly_fraction, kelly_position
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,9 @@ class StrategyConfig:
     risk_pct: float = 1.0
     cost_bps: float = 107.0
     cluster_entries: bool = True
+    z_min: float = 2.0
+    use_conviction: bool = False
+    use_kelly: bool = False
 
 
 @dataclass
@@ -70,7 +78,10 @@ def load_frames(delivery_dir: Path | str, min_rows: int = 40) -> list[pd.DataFra
         prepared = prepare_frame(raw, min_rows=min_rows)
         if prepared is None or "segment" not in prepared.columns:
             continue
-        frames.append(add_features(prepared))
+        featured = add_features(prepared)
+        if featured.empty or "symbol" not in featured.columns:
+            continue
+        frames.append(featured)
     return frames
 
 
@@ -87,7 +98,8 @@ def _prepare_tables(frames: list[pd.DataFrame], config: StrategyConfig):
             table["turnover"] = 0.0
         table = table.set_index("date")
 
-        raw_mask = signal_mask(table.reset_index(), config.signal)
+        raw_mask = signal_mask(table.reset_index(), config.signal,
+                               z_min=config.z_min)
         if config.cluster_entries:
             raw_mask = cluster_entry_mask(pd.Series(raw_mask.values))
         fires[sym] = pd.Series(raw_mask.values, index=table.index)
@@ -110,8 +122,13 @@ def run_portfolio(frames: list[pd.DataFrame],
     risk_rupees = config.capital * config.risk_pct / 100.0
     half_cost = config.cost_bps / 2 / 10_000  # fraction charged per side
 
+    # Running stats for Kelly sizing
+    kelly_win_rate = 0.43
+    kelly_avg_win = 250.0
+    kelly_avg_loss = 165.0
+
     def close_position(sym: str, day: Date, px: float, reason: str) -> None:
-        nonlocal cash
+        nonlocal cash, kelly_win_rate, kelly_avg_win, kelly_avg_loss
         pos = open_pos.pop(sym)
         gross = (px / pos["entry_px"] - 1.0) * 10_000
         net = gross - config.cost_bps
@@ -122,9 +139,17 @@ def run_portfolio(frames: list[pd.DataFrame],
             gross_bps=round(gross, 2), net_bps=round(net, 2),
             reason=reason, days_held=pos["days_held"],
         ))
+        # Update Kelly stats
+        if net > 0:
+            kelly_avg_win = (kelly_avg_win + net) / 2
+        else:
+            kelly_avg_loss = (kelly_avg_loss + abs(net)) / 2
+        closed = [t for t in trades if t.net_bps is not None]
+        wins = sum(1 for t in closed if t.net_bps > 0)
+        kelly_win_rate = wins / len(closed) if closed else 0.43
 
     for day in all_dates:
-        # ---------- exits
+        # ---------- exits (per-position horizon and stop)
         for sym in list(open_pos):
             table = tables[sym]
             if day not in table.index:
@@ -132,9 +157,9 @@ def run_portfolio(frames: list[pd.DataFrame],
             pos = open_pos[sym]
             pos["days_held"] += 1
             close = float(table.loc[day, "close"])
-            if close <= pos["entry_px"] * (1 - config.stop_pct):
+            if close <= pos["entry_px"] * (1 - pos["stop_pct"]):
                 close_position(sym, day, close, "STOP")
-            elif pos["days_held"] >= config.hold_days:
+            elif pos["days_held"] >= pos["hold_days"]:
                 close_position(sym, day, close, "HORIZON")
 
         # ---------- mark to market
@@ -149,7 +174,7 @@ def run_portfolio(frames: list[pd.DataFrame],
         # ---------- entries
         if len(open_pos) >= config.max_positions:
             continue
-        candidates: list[tuple[float, str]] = []
+        candidates: list[tuple[float, str, float, int, float]] = []
         for sym, table in tables.items():
             if sym in open_pos or day not in table.index:
                 continue
@@ -159,31 +184,43 @@ def run_portfolio(frames: list[pd.DataFrame],
             close = float(row["close"])
             if not (config.price_min <= close <= config.price_max):
                 continue
-            if float(row["turnover"]) < config.min_turnover:
+            if float(row.get("turnover", 0)) < config.min_turnover:
                 continue
             z = row.get("deliv_z")
             if config.signal.startswith("dz_"):
                 if pd.isna(z):
                     continue
-                candidates.append((float(z), sym))
+
+            if config.use_conviction:
+                score = conviction_score(row)
+                candidates.append((score, sym, close, config.hold_days, config.stop_pct))
             else:
-                candidates.append((0.0, sym))
+                candidates.append((float(z) if not pd.isna(z) else 0.0,
+                                   sym, close, config.hold_days, config.stop_pct))
 
         candidates.sort(key=lambda c: (-c[0], c[1]))
-        for _z, sym in candidates:
+        for score, sym, close, hold_d, stop in candidates:
             if len(open_pos) >= config.max_positions:
                 break
             row = tables[sym].loc[day]
-            close = float(row["close"])
-            stop_dist = close * config.stop_pct
-            qty_by_risk = int(risk_rupees // stop_dist) if stop_dist > 0 else 0
-            qty_by_capital = int((config.capital * 0.30) // close)
-            qty = max(0, min(qty_by_risk, qty_by_capital))
+
+            if config.use_kelly:
+                kf = kelly_fraction(kelly_win_rate, kelly_avg_win,
+                                    kelly_avg_loss)
+                qty = kelly_position(config.capital, config.risk_pct,
+                                     close, stop, kf)
+            else:
+                stop_dist = close * config.stop_pct
+                qty_by_risk = int(risk_rupees // stop_dist) if stop_dist > 0 else 0
+                qty_by_capital = int((config.capital * 0.30) // close)
+                qty = max(0, min(qty_by_risk, qty_by_capital))
+
             if qty < 1:
                 continue
             open_pos[sym] = {
                 "entry_date": day, "entry_px": close, "qty": qty,
                 "segment": str(row.get("segment", "EQ")), "days_held": 0,
+                "hold_days": hold_d, "stop_pct": stop, "conviction": score,
             }
             cash -= qty * close * half_cost
 
@@ -234,4 +271,6 @@ __all__ = [
     "load_frames",
     "run_portfolio",
     "summarize",
+    "conviction_score",
+    "horizon_fit",
 ]

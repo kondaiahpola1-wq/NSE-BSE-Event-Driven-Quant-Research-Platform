@@ -65,6 +65,82 @@ def add_features(df: pd.DataFrame, *, window: int = 30) -> pd.DataFrame:
     return out
 
 
+def conviction_score(row: pd.Series) -> float:
+    """Score 0-1 for signal strength. Higher = more conviction.
+
+    Components:
+      deliv_z  40%  — how abnormal delivery is
+      momentum 30%  — 1d return direction + magnitude
+      vol_trend 20% — volume confirms delivery spike
+      technicals 10% — RSI/MACD/trend alignment
+    Returns 0.0 if deliv_z is NaN.
+    """
+    dz = row.get("deliv_z")
+    if pd.isna(dz):
+        return 0.0
+
+    # 1. Delivery z-score (0-1, cap at z=5)
+    dz_norm = min(abs(dz) / 5.0, 1.0) * 0.40
+
+    # 2. Momentum (0-1, cap at 3% daily return)
+    ret = row.get("ret_1d", 0.0)
+    if pd.isna(ret):
+        ret = 0.0
+    momentum = min(max(ret / 0.03, 0.0), 1.0) * 0.30
+
+    # 3. Volume trend (0-1, cap at z=2)
+    vz = row.get("vol_z", 0.0)
+    if pd.isna(vz):
+        vz = 0.0
+    vol_trend = min(max(vz / 2.0, 0.0), 1.0) * 0.20
+
+    # 4. Technicals (0-1)
+    tech = 0.0
+    rsi = row.get("rsi", 50.0)
+    if pd.isna(rsi):
+        rsi = 50.0
+    macd_h = row.get("macd_hist", 0.0)
+    if pd.isna(macd_h):
+        macd_h = 0.0
+    close = row.get("close", 0.0)
+    sma20 = row.get("sma_20", close)
+    if pd.isna(sma20):
+        sma20 = close
+
+    # RSI in sweet spot 40-65 gets full mark
+    if 40 <= rsi <= 65:
+        tech += 0.4
+    elif 30 <= rsi <= 75:
+        tech += 0.2
+    # MACD positive
+    if macd_h > 0:
+        tech += 0.3
+    # Price above SMA20
+    if close > sma20 and sma20 > 0:
+        tech += 0.3
+    tech *= 0.10
+
+    return round(dz_norm + momentum + vol_trend + tech, 4)
+
+
+def horizon_fit(score: float) -> str:
+    """Assign holding horizon based on conviction score.
+
+    High conviction (>= 0.45) → 10d — let winners run.
+    Medium (0.25-0.45)        → 5d  — balanced.
+    Low (< 0.25)             → 1d  — quick scalp or skip.
+    """
+    if score >= 0.45:
+        return "10d"
+    if score >= 0.25:
+        return "5d"
+    return "1d"
+
+
+HORIZON_DAYS = {"1d": 1, "5d": 5, "10d": 10}
+HORIZON_STOP = {"1d": 0.03, "5d": 0.05, "10d": 0.07}
+
+
 def price_band(close: float) -> str:
     if close < 50:
         return "<50"
@@ -80,17 +156,17 @@ def cluster_entry_mask(mask: pd.Series) -> pd.Series:
     return mask & ~mask.shift(fill_value=False)
 
 
-def signal_mask(frame: pd.DataFrame, name: str) -> pd.Series:
+def signal_mask(frame: pd.DataFrame, name: str, z_min: float = 2.0) -> pd.Series:
     """Boolean firing mask for each named delivery signal."""
     frame["deliv_z"]
     frame["ret_1d"]
 
     if name == "dz_hi_up":
-        return (frame["deliv_z"] >= 2) & (frame["ret_1d"] >= 0.005)
+        return (frame["deliv_z"] >= z_min) & (frame["ret_1d"] >= 0.005)
     if name == "dz_hi_dn":
-        return (frame["deliv_z"] >= 2) & (frame["ret_1d"] <= -0.005)
+        return (frame["deliv_z"] >= z_min) & (frame["ret_1d"] <= -0.005)
     if name == "dz_lo_up":
-        return (frame["deliv_z"] <= -2) & (frame["ret_1d"] >= 0.005)
+        return (frame["deliv_z"] <= -z_min) & (frame["ret_1d"] >= 0.005)
     if name == "spike_70":
         return frame["deliv_pct"] >= 70
     if name == "streak3":
@@ -188,6 +264,10 @@ SIGNAL_NAMES = (
 __all__ = [
     "SIGNAL_NAMES",
     "add_features",
+    "conviction_score",
+    "horizon_fit",
+    "HORIZON_DAYS",
+    "HORIZON_STOP",
     "prepare_frame",
     "price_band",
     "cluster_entry_mask",

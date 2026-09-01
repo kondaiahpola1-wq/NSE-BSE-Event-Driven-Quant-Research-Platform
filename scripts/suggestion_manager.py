@@ -22,7 +22,8 @@ import numpy as np
 import pandas as pd
 
 from indian_quant.config import load_settings
-from indian_quant.features.delivery import add_features, prepare_frame
+from indian_quant.features.delivery import add_features, conviction_score, prepare_frame
+from indian_quant.portfolio.kelly import kelly_fraction, kelly_position
 from indian_quant.storage import MetadataStore
 
 HORIZONS = [
@@ -58,6 +59,8 @@ def _scan_today(settings) -> pd.DataFrame:
             "deliv_z": float(last["deliv_z"]) if not pd.isna(last["deliv_z"]) else None,
             "vol_z": float(last.get("vol_z", 0)) if not pd.isna(last.get("vol_z", np.nan)) else None,
             "ret_1d": float(last["ret_1d"]),
+            "rsi": float(last.get("rsi", 50)) if not pd.isna(last.get("rsi", np.nan)) else 50.0,
+            "macd_hist": float(last.get("macd_hist", 0)) if not pd.isna(last.get("macd_hist", np.nan)) else 0.0,
             "sma_20": float(last["sma_20"]) if not pd.isna(last.get("sma_20", np.nan)) else None,
             "date": last["date"].date().isoformat(),
             "_atr": float(last.get("atr_14", 0)) if not pd.isna(last.get("atr_14", np.nan)) else 0,
@@ -97,17 +100,15 @@ def cmd_record(settings, *, capital: float, risk_pct: float) -> int:
             continue
 
         mcap_info = get_market_cap(router, r["symbol"], "NSE", cache)
+        score = conviction_score(r)
 
         for hz in HORIZONS:
             hz_capital = capital * hz["capital_pct"]
-            risk_rupees = hz_capital * risk_pct / 100.0
-
-            stop_dist = r["close"] * hz["stop_pct"]
-            qty_by_risk = int(risk_rupees // stop_dist) if stop_dist > 0 else 0
-            qty_by_capital = int((hz_capital * 0.90) // r["close"])
-            qty = max(0, min(qty_by_risk, qty_by_capital))
+            kf = kelly_fraction(0.43, 250.0, 165.0)
+            qty = kelly_position(hz_capital, risk_pct, r["close"],
+                                 hz["stop_pct"], kf)
             if qty < 1:
-                continue
+                qty = 1
 
             atr = r.get("_atr", r["close"] * 0.03)
             entry_low = round(r["close"] - atr * 0.5, 2)
@@ -131,11 +132,14 @@ def cmd_record(settings, *, capital: float, risk_pct: float) -> int:
                 horizon_days=hz["days"],
                 qty=qty,
                 predicted_return_bps=hz["predicted_bps"],
-                note=f"z={r['deliv_z']:.2f} mcap={mcap_info['market_cap_class']}",
+                conviction_score=round(score, 4),
+                kelly_fraction=round(kf, 6),
+                note=f"z={r['deliv_z']:.2f} score={score:.3f} mcap={mcap_info['market_cap_class']}",
             )
             created += 1
             print(f"  #{sid} {r['symbol']} [{hz['label']}] @\u20b9{r['close']:.2f} "
                   f"qty={qty} stop=\u20b9{stop_loss} target=\u20b9{target} "
+                  f"score={score:.3f} kf={kf:.4f} "
                   f"z={r['deliv_z']:.2f} [{mcap_info['market_cap_class']}]")
 
     save_mcap_cache(cache)

@@ -95,15 +95,18 @@ def main() -> int:
     router = SourceRouter()
     cache = load_mcap_cache()
 
-    for _, r in buys.iterrows():
-        info = get_market_cap(router, r["symbol"], "NSE", cache)
-        r["market_cap_cr"] = info["market_cap_cr"]
-        r["market_cap_class"] = info["market_cap_class"]
+    mcap_data = {}
+    for sym in set(buys["symbol"].tolist() + avoid["symbol"].tolist()):
+        info = get_market_cap(router, sym, "NSE", cache)
+        mcap_data[sym] = info
 
-    for _, r in avoid.iterrows():
-        info = get_market_cap(router, r["symbol"], "NSE", cache)
-        r["market_cap_cr"] = info["market_cap_cr"]
-        r["market_cap_class"] = info["market_cap_class"]
+    for df_part in [buys, avoid]:
+        if df_part.empty:
+            continue
+        df_part["market_cap_cr"] = df_part["symbol"].map(
+            lambda s: mcap_data.get(s, {}).get("market_cap_cr", 0))
+        df_part["market_cap_class"] = df_part["symbol"].map(
+            lambda s: mcap_data.get(s, {}).get("market_cap_class", "Other"))
 
     save_mcap_cache(cache)
 

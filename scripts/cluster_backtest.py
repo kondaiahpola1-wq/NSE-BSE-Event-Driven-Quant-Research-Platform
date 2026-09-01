@@ -31,6 +31,9 @@ def main() -> int:
     parser.add_argument("--risk-pct", type=float, default=1.0)
     parser.add_argument("--min-turnover", type=float, default=10_000_000.0)
     parser.add_argument("--no-cluster", action="store_true")
+    parser.add_argument("--z-min", type=float, default=2.0)
+    parser.add_argument("--use-conviction", action="store_true")
+    parser.add_argument("--use-kelly", action="store_true")
     parser.add_argument("--config", default=None)
     args = parser.parse_args()
 
@@ -50,6 +53,9 @@ def main() -> int:
         capital=args.capital,
         risk_pct=args.risk_pct,
         cluster_entries=not args.no_cluster,
+        z_min=args.z_min,
+        use_conviction=args.use_conviction,
+        use_kelly=args.use_kelly,
     )
     result = pb.run_portfolio(frames, cfg)
 
