@@ -67,11 +67,15 @@ def fetch_sector(symbol: str) -> dict | None:
     # 3. yfinance fallback
     try:
         import yfinance as yf
-        ticker = yf.Ticker(f"{symbol}.NS")
-        info = ticker.info
-        sector = info.get("sector")
-        if sector:
-            return {"sector": sector, "industry": info.get("industry")}
+        for suffix in (".NS", ".BO"):
+            try:
+                ticker = yf.Ticker(f"{symbol}{suffix}")
+                info = ticker.info
+                sector = info.get("sector")
+                if sector:
+                    return {"sector": sector, "industry": info.get("industry")}
+            except Exception:
+                continue
     except Exception:
         pass
 

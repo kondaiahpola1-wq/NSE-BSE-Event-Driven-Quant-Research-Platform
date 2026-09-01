@@ -88,13 +88,25 @@ def _fetch_company_profile(symbol: str) -> dict | None:
     return None
 
 
+def _yf_ticker(symbol: str):
+    """Try yfinance with .NS then .BO suffix."""
+    import yfinance as yf
+    for suffix in (".NS", ".BO"):
+        try:
+            t = yf.Ticker(f"{symbol}{suffix}")
+            info = t.info
+            if info and info.get("trailingPE"):
+                return t, info
+        except Exception:
+            continue
+    return None, None
+
+
 def _fetch_yfinance(symbol: str) -> dict | None:
     """Fetch from yfinance as last resort."""
     try:
-        import yfinance as yf
-        ticker = yf.Ticker(f"{symbol}.NS")
-        info = ticker.info
-        if not info or not info.get("trailingPE"):
+        ticker, info = _yf_ticker(symbol)
+        if not ticker or not info:
             return None
         return {
             "source": "yfinance",
@@ -253,8 +265,9 @@ def fetch_profile(symbol: str) -> dict | None:
     # Fallback: yfinance
     try:
         import yfinance as yf
-        ticker = yf.Ticker(f"{symbol}.NS")
-        info = ticker.info
+        ticker, info = _yf_ticker(symbol)
+        if not ticker or not info:
+            return None
         return {
             "company_name": info.get("longName"),
             "sector": info.get("sector"),
