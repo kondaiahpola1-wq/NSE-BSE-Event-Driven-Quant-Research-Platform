@@ -1,8 +1,9 @@
 """APScheduler background service for daily signal cache refresh.
 
 Runs inside the FastAPI process:
-    - 18:00 IST daily: full cache rebuild (PostgreSQL + Redis)
-    - Every 15 min: warm Redis from PostgreSQL (fast)
+    - 18:00 IST daily (Mon-Fri): full cache rebuild (PostgreSQL + Redis)
+    - Every 15 min during market hours (08:30–15:30 IST, Mon-Fri): warm Redis
+    - Every 30 min during evening (18:00–21:00 IST, Mon-Fri): warm Redis
 
 Usage:
     - Automatically started when web app starts
@@ -14,18 +15,35 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger("quant.scheduler")
 
 _scheduler: BackgroundScheduler | None = None
+TZ_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _is_weekday() -> bool:
+    return datetime.now(TZ_IST).weekday() < 5
+
+
+def _is_market_hours() -> bool:
+    now = datetime.now(TZ_IST)
+    return _is_weekday() and 8 <= now.hour < 16
+
+
+def _is_evening_hours() -> bool:
+    now = datetime.now(TZ_IST)
+    return _is_weekday() and 18 <= now.hour < 21
 
 
 def _full_cache_rebuild() -> None:
     """Run cache_signals.py to rebuild PostgreSQL + Redis cache."""
+    if not _is_weekday():
+        return
     logger.info("Starting full cache rebuild...")
     try:
         result = subprocess.run(
@@ -42,9 +60,10 @@ def _full_cache_rebuild() -> None:
 
 def _warm_redis() -> None:
     """Quick Redis warm from PostgreSQL (no parquet scan)."""
+    if not (_is_market_hours() or _is_evening_hours()):
+        return  # skip outside active hours
     try:
         import json
-        import math
 
         import pandas as pd
 
@@ -84,6 +103,24 @@ def _warm_redis() -> None:
         logger.info(f"Redis warmed: {len(signals)} signals")
     except Exception as e:
         logger.warning(f"Redis warm failed: {e}")
+
+
+def _intra_day_signals() -> None:
+    """Quick signal refresh during market hours (every 30 min)."""
+    if not _is_market_hours():
+        return
+    logger.info("Intra-day signal refresh...")
+    try:
+        result = subprocess.run(
+            [sys.executable, "scripts/daily_signals.py"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            logger.info("Intra-day signals done")
+        else:
+            logger.warning(f"Intra-day signals failed: {result.stderr[:300]}")
+    except Exception as e:
+        logger.warning(f"Intra-day signals error: {e}")
 
 
 def _sanitize_nan(signals: list[dict]) -> None:
@@ -143,26 +180,51 @@ def start_scheduler() -> BackgroundScheduler:
 
     _scheduler = BackgroundScheduler(timezone="Asia/Kolkata")
 
-    # Full rebuild daily at 18:00 IST (after market close)
+    # Full rebuild daily at 18:00 IST Mon-Fri (after market close)
     _scheduler.add_job(
         _full_cache_rebuild,
-        CronTrigger(hour=18, minute=0, timezone="Asia/Kolkata"),
+        CronTrigger(hour=18, minute=0, day_of_week="mon-fri",
+                    timezone="Asia/Kolkata"),
         id="daily_cache_rebuild",
-        name="Daily cache rebuild (18:00 IST)",
+        name="Daily cache rebuild (18:00 IST Mon-Fri)",
         replace_existing=True,
     )
 
-    # Warm Redis every 15 minutes
+    # Warm Redis every 15 min during market hours (Mon-Fri 08:00–16:00)
     _scheduler.add_job(
         _warm_redis,
-        IntervalTrigger(minutes=15),
-        id="redis_warm",
-        name="Redis warm (every 15m)",
+        CronTrigger(minute="*/15", hour="8-15", day_of_week="mon-fri",
+                    timezone="Asia/Kolkata"),
+        id="redis_warm_market",
+        name="Redis warm (every 15m, market hours)",
+        replace_existing=True,
+    )
+
+    # Warm Redis every 30 min during evening (Mon-Fri 18:00–21:00)
+    _scheduler.add_job(
+        _warm_redis,
+        CronTrigger(minute="*/30", hour="18-20", day_of_week="mon-fri",
+                    timezone="Asia/Kolkata"),
+        id="redis_warm_evening",
+        name="Redis warm (every 30m, evening)",
+        replace_existing=True,
+    )
+
+    # Intra-day signal refresh every 30 min during market hours (Mon-Fri 09:00–15:30)
+    _scheduler.add_job(
+        _intra_day_signals,
+        CronTrigger(minute="*/30", hour="9-15", day_of_week="mon-fri",
+                    timezone="Asia/Kolkata"),
+        id="intra_day_signals",
+        name="Intra-day signal refresh (every 30m, market hours)",
         replace_existing=True,
     )
 
     _scheduler.start()
-    logger.info("Scheduler started: daily rebuild @ 18:00 IST, Redis warm every 15m")
+    logger.info(
+        "Scheduler started: daily rebuild @18:00, Redis warm 15m (market) / 30m (evening), "
+        "signal refresh 30m (market) — all Mon-Fri only"
+    )
     return _scheduler
 
 
