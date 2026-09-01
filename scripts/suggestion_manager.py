@@ -23,6 +23,8 @@ import pandas as pd
 
 from indian_quant.config import load_settings
 from indian_quant.features.delivery import add_features, conviction_score, prepare_frame
+from indian_quant.storage.pg_metadata import PgMetadataStore
+from indian_quant.web.prod_config import get_pg_engine
 from indian_quant.portfolio.kelly import kelly_fraction, kelly_position
 from indian_quant.storage import MetadataStore
 
@@ -77,7 +79,7 @@ def cmd_record(settings, *, capital: float, risk_pct: float) -> int:
     latest = df["date"].max()
     day = df[df["date"] == latest]
 
-    metadata = MetadataStore(settings.storage.metadata_dsn)
+    metadata = PgMetadataStore(get_pg_engine())
 
     existing = set()
     for s in metadata.suggestions_by_date(latest):
@@ -152,7 +154,7 @@ def cmd_record(settings, *, capital: float, risk_pct: float) -> int:
 
 
 def cmd_settle(settings) -> int:
-    metadata = MetadataStore(settings.storage.metadata_dsn)
+    metadata = PgMetadataStore(get_pg_engine())
     dl_dir = settings.normalized_dir / "delivery" / "NSE"
     settled_count = skipped = 0
 
@@ -195,7 +197,7 @@ def cmd_settle(settings) -> int:
 
 
 def cmd_report(settings) -> int:
-    metadata = MetadataStore(settings.storage.metadata_dsn)
+    metadata = PgMetadataStore(get_pg_engine())
     s = metadata.suggestions_summary()
     by_hz = metadata.suggestions_by_horizon()
 

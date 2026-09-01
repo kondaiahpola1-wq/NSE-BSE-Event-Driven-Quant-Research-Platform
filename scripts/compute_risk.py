@@ -163,13 +163,12 @@ def upsert_stock_risk(engine, data: dict) -> None:
 
 def compute_portfolio_risk(engine) -> dict | None:
     """Compute portfolio-level risk metrics from open paper trades."""
-    # Get open positions
+    # Get open positions from PostgreSQL
     with engine.connect() as conn:
-        result = conn.execute(sa.text(
-            "SELECT symbol, close_at_signal, qty, horizon_label, stop_pct "
-            "FROM paper_signals WHERE status = 'OPEN'"
-        ))
-        positions = [dict(row) for row in result.mappings().fetchall()]
+        rows = conn.execute(
+            sa.text("SELECT symbol, close_at_signal, qty, horizon_label, stop_pct FROM paper_signals WHERE status = 'OPEN'")
+        ).mappings().fetchall()
+        positions = [dict(r) for r in rows]
 
     if not positions:
         return None

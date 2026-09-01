@@ -82,8 +82,9 @@ async def dashboard(request: Request):
         ws.close()
     # Per-horizon breakdown
     settings = load_settings()
-    from indian_quant.storage import MetadataStore
-    md = MetadataStore(settings.storage.metadata_dsn)
+    from indian_quant.storage.pg_metadata import PgMetadataStore
+    from indian_quant.web.prod_config import get_pg_engine
+    md = PgMetadataStore(get_pg_engine())
     sugg_by_hz = md.suggestions_by_horizon()
     md.close()
     return templates.TemplateResponse(request, "dashboard.html", {
@@ -140,8 +141,9 @@ async def api_portfolio(
     limit: int = 200,
 ):
     settings = dl._settings()
-    from indian_quant.storage import MetadataStore
-    md = MetadataStore(settings.storage.metadata_dsn)
+    from indian_quant.storage.pg_metadata import PgMetadataStore
+    from indian_quant.web.prod_config import get_pg_engine
+    md = PgMetadataStore(get_pg_engine())
     pf = md.portfolio_summary()
     by_hz = md.paper_trades_by_horizon()
     trades = md.trade_log(
@@ -158,8 +160,9 @@ async def positions_page(request: Request):
     horizon = request.query_params.get("horizon", "")
     status = request.query_params.get("status", "")
     settings = dl._settings()
-    from indian_quant.storage import MetadataStore
-    md = MetadataStore(settings.storage.metadata_dsn)
+    from indian_quant.storage.pg_metadata import PgMetadataStore
+    from indian_quant.web.prod_config import get_pg_engine
+    md = PgMetadataStore(get_pg_engine())
     pf = md.portfolio_summary()
     by_hz = md.paper_trades_by_horizon()
     trades = md.trade_log(
@@ -210,21 +213,24 @@ async def risk_page(request: Request):
 @app.get("/suggestions", response_class=HTMLResponse)
 async def suggestions_page(request: Request):
     settings = dl._settings()
-    from indian_quant.storage import MetadataStore
-    md = MetadataStore(settings.storage.metadata_dsn)
+    from indian_quant.storage.pg_metadata import PgMetadataStore
+    from indian_quant.web.prod_config import get_pg_engine
+    import sqlalchemy as sa
+    engine = get_pg_engine()
+    md = PgMetadataStore(engine)
     summary = md.suggestions_summary()
-    import sqlite3 as _sq
-    con = _sq.connect(str(Path(settings.storage.metadata_dsn.removeprefix("sqlite:///"))))
-    con.row_factory = _sq.Row
-    recent = [dict(r) for r in con.execute(
-        "SELECT * FROM daily_suggestions ORDER BY suggestion_date DESC, symbol LIMIT 100"
-    ).fetchall()]
-    by_type = [dict(r) for r in con.execute(
-        """SELECT signal_type, COUNT(*) n, AVG(actual_return_bps) avg_net,
-           SUM(hit)*1.0/COUNT(*)*100 accuracy
-           FROM daily_suggestions WHERE status='REALIZED'
-           GROUP BY signal_type ORDER BY avg_net DESC"""
-    ).fetchall()]
+    with engine.connect() as conn:
+        recent = [dict(r) for r in conn.execute(
+            sa.text("SELECT * FROM daily_suggestions ORDER BY suggestion_date DESC, symbol LIMIT 100")
+        ).mappings().fetchall()]
+        by_type = [dict(r) for r in conn.execute(
+            sa.text("""
+                SELECT signal_type, COUNT(*) n, AVG(actual_return_bps) avg_net,
+                       SUM(hit)*1.0/COUNT(*)*100 accuracy
+                FROM daily_suggestions WHERE status='REALIZED'
+                GROUP BY signal_type ORDER BY avg_net DESC
+            """)
+        ).mappings().fetchall()]
     con.close()
     # Get cached signals for market cap breakdown
     cached_signals = get_latest_signals_cached()

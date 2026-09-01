@@ -24,7 +24,8 @@ import pandas as pd
 from indian_quant.config import load_settings
 from indian_quant.features.delivery import add_features, conviction_score, prepare_frame
 from indian_quant.portfolio.kelly import kelly_fraction, kelly_position
-from indian_quant.storage import MetadataStore
+from indian_quant.storage.pg_metadata import PgMetadataStore
+from indian_quant.web.prod_config import get_pg_engine
 
 GO_LIVE_MIN_SETTLED = 20
 GO_LIVE_REALIZED_FLOOR_BPS = 25.0
@@ -79,7 +80,7 @@ def cmd_snapshot(settings, *, capital: float, risk_pct: float) -> int:
     router = SourceRouter()
     cache = load_mcap_cache()
 
-    metadata = MetadataStore(settings.storage.metadata_dsn)
+    metadata = PgMetadataStore(get_pg_engine())
     open_syms = {p["symbol"] for p in metadata.open_papers()}
     created = 0
 
@@ -133,7 +134,7 @@ def cmd_snapshot(settings, *, capital: float, risk_pct: float) -> int:
 
 
 def cmd_settle(settings) -> int:
-    metadata = MetadataStore(settings.storage.metadata_dsn)
+    metadata = PgMetadataStore(get_pg_engine())
     dl_dir = settings.normalized_dir / "delivery" / "NSE"
     settled = skipped = 0
     for paper in metadata.open_papers():
@@ -169,7 +170,7 @@ def cmd_settle(settings) -> int:
 
 
 def cmd_report(settings, *, min_settled: int, floor_bps: float) -> int:
-    metadata = MetadataStore(settings.storage.metadata_dsn)
+    metadata = PgMetadataStore(get_pg_engine())
     s = metadata.papers_summary()
     pf = metadata.portfolio_summary()
     by_hz = metadata.paper_trades_by_horizon()
@@ -187,7 +188,7 @@ def cmd_report(settings, *, min_settled: int, floor_bps: float) -> int:
 
 
 def cmd_log(settings, *, horizon: str | None, status: str | None, limit: int) -> int:
-    metadata = MetadataStore(settings.storage.metadata_dsn)
+    metadata = PgMetadataStore(get_pg_engine())
     trades = metadata.trade_log(horizon=horizon, status=status, limit=limit)
     metadata.close()
     for t in trades:
