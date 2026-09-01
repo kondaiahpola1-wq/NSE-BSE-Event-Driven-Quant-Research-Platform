@@ -80,12 +80,19 @@ async def dashboard(request: Request):
         ws = _ws()
         watchlist_count = ws.symbol_count(uid)
         ws.close()
+    # Per-horizon breakdown
+    settings = load_settings()
+    from indian_quant.storage import MetadataStore
+    md = MetadataStore(settings.storage.metadata_dsn)
+    sugg_by_hz = md.suggestions_by_horizon()
+    md.close()
     return templates.TemplateResponse(request, "dashboard.html", {
         "request": request,
         "papers": papers,
         "gate": gate,
         "signals": signals,
         "sugg": sugg,
+        "sugg_by_hz": sugg_by_hz,
         "username": get_current_username(request),
         "watchlist_count": watchlist_count,
     })
@@ -126,14 +133,50 @@ async def api_signals(
     )
 
 
+@app.get("/api/portfolio")
+async def api_portfolio(
+    horizon: str = "",
+    status: str = "",
+    limit: int = 200,
+):
+    settings = dl._settings()
+    from indian_quant.storage import MetadataStore
+    md = MetadataStore(settings.storage.metadata_dsn)
+    pf = md.portfolio_summary()
+    by_hz = md.paper_trades_by_horizon()
+    trades = md.trade_log(
+        horizon=horizon if horizon else None,
+        status=status if status else None,
+        limit=limit,
+    )
+    md.close()
+    return {"portfolio": pf, "by_horizon": by_hz, "trades": trades}
+
+
 @app.get("/positions", response_class=HTMLResponse)
 async def positions_page(request: Request):
+    horizon = request.query_params.get("horizon", "")
+    status = request.query_params.get("status", "")
+    settings = dl._settings()
+    from indian_quant.storage import MetadataStore
+    md = MetadataStore(settings.storage.metadata_dsn)
+    pf = md.portfolio_summary()
+    by_hz = md.paper_trades_by_horizon()
+    trades = md.trade_log(
+        horizon=horizon if horizon else None,
+        status=status if status else None,
+        limit=100,
+    )
+    md.close()
     papers = dl.get_paper_summary()
-    gate = dl.get_gate_progress()
     return templates.TemplateResponse(request, "positions.html", {
         "request": request,
         "papers": papers,
-        "gate": gate,
+        "pf": pf,
+        "by_hz": by_hz,
+        "trades": trades,
+        "filter_horizon": horizon,
+        "filter_status": status,
         "username": get_current_username(request),
     })
 

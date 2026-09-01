@@ -14,5 +14,4 @@ redis>=5.0
 sqlalchemy>=2.0
 apscheduler>=3.10
 python-multipart>=0.0.18
-seleniumbase>=4.50
-pynacl>=1.5
+

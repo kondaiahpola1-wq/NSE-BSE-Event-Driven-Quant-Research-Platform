@@ -55,8 +55,8 @@
   <th data-sort="ret_1d_pct">1d Return</th>
   <th data-sort="rsi">RSI</th>
   <th>Entry Zone</th>
-  <th>Stop Loss</th>
-  <th>Target</th>
+  <th>1d Stop</th><th>5d Stop</th><th>10d Stop</th>
+  <th>1d Tgt</th><th>5d Tgt</th><th>10d Tgt</th>
   <th data-sort="score">Score</th>
 </tr>
 <tbody id="sigBody"></tbody>
@@ -91,9 +91,14 @@
     const ret = s.ret_1d_pct!=null ? (s.ret_1d_pct>0?'+':'')+s.ret_1d_pct+'%' : '—';
     const rsi = s.rsi!=null ? s.rsi : '—';
     const entry = s.entry_zone_low!=null ? '₹'+s.entry_zone_low+'–'+s.entry_zone_high : '—';
-    const sl = s.stop_loss!=null ? '₹'+s.stop_loss : '—';
-    const tgt = s.target_price!=null ? '₹'+s.target_price : '—';
     const capCls = s.market_cap_class || '—';
+    const close = s.close || 0;
+    const stop1d = close ? '₹'+(close*0.97).toFixed(2) : '—';
+    const stop5d = close ? '₹'+(close*0.95).toFixed(2) : '—';
+    const stop10d = close ? '₹'+(close*0.93).toFixed(2) : '—';
+    const tgt1d = close ? '₹'+(close*1.02).toFixed(2) : '—';
+    const tgt5d = close ? '₹'+(close*1.05).toFixed(2) : '—';
+    const tgt10d = close ? '₹'+(close*1.08).toFixed(2) : '—';
     return '<tr>'
       + '<td>'+idx+'</td>'
       + '<td class="mono"><a href="/stock/'+s.symbol+'" target="_blank" style="color:inherit;text-decoration:underline">'+s.symbol+'</a></td>'
@@ -107,8 +112,12 @@
       + '<td>'+ret+'</td>'
       + '<td class="mono">'+rsi+'</td>'
       + '<td class="mono">'+entry+'</td>'
-      + '<td class="mono bad">'+sl+'</td>'
-      + '<td class="mono good">'+tgt+'</td>'
+      + '<td class="mono bad" style="font-size:11px">'+stop1d+'</td>'
+      + '<td class="mono bad" style="font-size:11px">'+stop5d+'</td>'
+      + '<td class="mono bad" style="font-size:11px">'+stop10d+'</td>'
+      + '<td class="mono good" style="font-size:11px">'+tgt1d+'</td>'
+      + '<td class="mono good" style="font-size:11px">'+tgt5d+'</td>'
+      + '<td class="mono good" style="font-size:11px">'+tgt10d+'</td>'
       + '<td class="mono">'+scoreBadge(s._score)+'</td>'
       + '</tr>';
   }

@@ -1,9 +1,13 @@
 """Paper-trading ledger: snapshot today's candidates, settle, report.
 
+Multi-horizon support: each signal is recorded for 1d, 5d, and 10d horizons
+with progressively wider stops (3%, 5%, 7%).
+
 Subcommands:
-    snapshot   write current dz_hi_up BUY candidates as OPEN paper rows
-    settle     close OPEN rows past horizon or stop-hit (latest delivery closes)
-    report     predicted-vs-realized summary + GO-LIVE gate verdict
+    snapshot   write current dz_hi_up BUY candidates as OPEN paper rows (x3 horizons)
+    settle     close OPEN rows past horizon or stop-hit
+    report     predicted-vs-realized summary + GO-LIVE gate verdict by horizon
+    log        print full trade log with all portfolio fields
 """
 
 from __future__ import annotations
@@ -22,7 +26,13 @@ from indian_quant.features.delivery import add_features, prepare_frame
 from indian_quant.storage import MetadataStore
 
 GO_LIVE_MIN_SETTLED = 20
-GO_LIVE_REALIZED_FLOOR_BPS = 25.0  # >=50% of researched ~50bps net expectancy
+GO_LIVE_REALIZED_FLOOR_BPS = 25.0
+
+HORIZONS = [
+    {"days": 1, "label": "1d", "stop_pct": 0.03, "capital_pct": 0.25},
+    {"days": 5, "label": "5d", "stop_pct": 0.05, "capital_pct": 0.35},
+    {"days": 10, "label": "10d", "stop_pct": 0.07, "capital_pct": 0.40},
+]
 
 
 def _scan_today(settings) -> pd.DataFrame:
@@ -57,10 +67,8 @@ def cmd_snapshot(settings, *, capital: float, risk_pct: float) -> int:
     latest = df["date"].max()
     day = df[df["date"] == latest]
 
-    # NO price filter — scan ALL stocks
     buys = day[(day["deliv_z"] >= 2) & (day["ret_1d"] >= 0.005)]
 
-    # Classify by market cap
     from indian_quant.features.market_cap import get_market_cap, load_mcap_cache, save_mcap_cache
     from indian_quant.ingestion.router import SourceRouter
     router = SourceRouter()
@@ -69,31 +77,50 @@ def cmd_snapshot(settings, *, capital: float, risk_pct: float) -> int:
     metadata = MetadataStore(settings.storage.metadata_dsn)
     open_syms = {p["symbol"] for p in metadata.open_papers()}
     created = 0
+
     for _, r in buys.iterrows():
         if r["symbol"] in open_syms:
             continue
 
         mcap_info = get_market_cap(router, r["symbol"], "NSE", cache)
-        risk_rupees = capital * risk_pct / 100.0
-        stop_dist = r["close"] * 0.07
-        qty_by_risk = int(risk_rupees // stop_dist) if stop_dist > 0 else 0
-        qty_by_capital = int((capital * 0.30) // r["close"])
-        qty = max(0, min(qty_by_risk, qty_by_capital))
-        if qty < 1:
-            continue
-        metadata.record_paper_signal(
-            symbol=r["symbol"], close_at_signal=float(r["close"]), qty=qty,
-            horizon_days=10, stop_pct=0.07, segment=str(r["segment"]),
-            note=f"dz={r['deliv_z']:.2f} mcap={mcap_info['market_cap_class']}",
-        )
-        created += 1
-        print(f"OPEN {r['symbol']} @{r['close']:.2f} qty {qty} "
-              f"(z {r['deliv_z']}) [{mcap_info['market_cap_class']}]")
+
+        for hz in HORIZONS:
+            hz_capital = capital * hz["capital_pct"]
+            risk_rupees = hz_capital * risk_pct / 100.0
+            stop_dist = r["close"] * hz["stop_pct"]
+            qty_by_risk = int(risk_rupees // stop_dist) if stop_dist > 0 else 0
+            qty_by_capital = int((hz_capital * 0.90) // r["close"])
+            qty = max(0, min(qty_by_risk, qty_by_capital))
+            if qty < 1:
+                continue
+
+            position_value = qty * r["close"]
+            risk_amount = qty * stop_dist
+
+            metadata.record_paper_signal(
+                symbol=r["symbol"], close_at_signal=float(r["close"]), qty=qty,
+                horizon_days=hz["days"], stop_pct=hz["stop_pct"],
+                segment=str(r["segment"]),
+                entry_date=latest,
+                position_value=round(position_value, 2),
+                risk_amount=round(risk_amount, 2),
+                horizon_label=hz["label"],
+                capital_allocated=round(hz_capital, 2),
+                note=f"dz={r['deliv_z']:.2f} mcap={mcap_info['market_cap_class']}",
+            )
+            created += 1
+            print(f"OPEN {r['symbol']} [{hz['label']}] @{r['close']:.2f} "
+                  f"qty {qty} stop={hz['stop_pct']*100:.0f}% "
+                  f"val=₹{position_value:,.0f} risk=₹{risk_amount:,.0f} "
+                  f"(z {r['deliv_z']}) [{mcap_info['market_cap_class']}]")
+
+        open_syms.add(r["symbol"])
 
     save_mcap_cache(cache)
     summary = metadata.papers_summary()
+    by_hz = metadata.paper_trades_by_horizon()
     metadata.close()
-    print(json.dumps({"created": created, **summary}, indent=1))
+    print(json.dumps({"created": created, **summary, "by_horizon": by_hz}, indent=1))
     return 0
 
 
@@ -119,27 +146,59 @@ def cmd_settle(settings) -> int:
             continue
         reason = "STOP" if hit_stop else "HORIZON"
         result = metadata.settle_paper_signal(
-            paper["id"], exit_date=latest_date, exit_close=latest_close)
-        print(f"SETTLE {paper['symbol']} ({reason}): net "
-              f"{result['realized_net_bps']}bps")
+            paper["id"], exit_date=latest_date, exit_close=latest_close,
+            exit_reason=reason)
+        print(f"SETTLE {paper['symbol']} [{paper.get('horizon_label', '?')}] "
+              f"({reason}): net {result['realized_net_bps']}bps "
+              f"ret={result['return_pct']:.1f}% days={result['days_held']}")
         settled += 1
     summary = metadata.papers_summary()
+    by_hz = metadata.paper_trades_by_horizon()
     metadata.close()
     print(json.dumps({"settled_now": settled, "skipped_still_open": skipped,
-                      **summary}, indent=1))
+                      **summary, "by_horizon": by_hz}, indent=1))
     return 0
 
 
 def cmd_report(settings, *, min_settled: int, floor_bps: float) -> int:
     metadata = MetadataStore(settings.storage.metadata_dsn)
     s = metadata.papers_summary()
+    pf = metadata.portfolio_summary()
+    by_hz = metadata.paper_trades_by_horizon()
     metadata.close()
     passed = (s["settled"] or 0) >= min_settled and (
         s["avg_net_bps"] is not None and s["avg_net_bps"] >= floor_bps)
     verdict = ("PASS — GO-LIVE CHECKLIST may be generated"
                if passed else
-               f"PENDING — need ≥{min_settled} settled with avg_net ≥ {floor_bps}bps")
-    print(json.dumps({"summary": s, "golive_gate": verdict}, indent=1))
+               f"PENDING — need >= {min_settled} settled with avg_net >= {floor_bps}bps")
+    print(json.dumps({
+        "summary": s, "portfolio": pf,
+        "by_horizon": by_hz, "golive_gate": verdict,
+    }, indent=1))
+    return 0
+
+
+def cmd_log(settings, *, horizon: str | None, status: str | None, limit: int) -> int:
+    metadata = MetadataStore(settings.storage.metadata_dsn)
+    trades = metadata.trade_log(horizon=horizon, status=status, limit=limit)
+    metadata.close()
+    for t in trades:
+        entry = t.get("entry_date", "?")[:10]
+        exit_d = (t.get("exit_date") or "")[:10]
+        entry_px = t["close_at_signal"]
+        exit_px = t.get("exit_close")
+        ret = t.get("return_pct")
+        net = t.get("realized_net_bps")
+        status_s = t["status"]
+        reason = t.get("exit_reason", "")
+        hz = t.get("horizon_label", "?")
+        exit_str = f"{exit_px:.2f}" if exit_px else "—"
+        ret_str = f"{ret:+.1f}%" if ret is not None else "—"
+        net_str = f"{net:+.0f}bps" if net is not None else "—"
+        print(f"  {t['symbol']:12s} {hz:3s} {status_s:8s} "
+              f"entry={entry} @{entry_px:.2f} "
+              f"exit={exit_d} @{exit_str} "
+              f"ret={ret_str} net={net_str} {reason}")
     return 0
 
 
@@ -157,6 +216,11 @@ def main() -> int:
     rep.add_argument("--min-settled", type=int, default=GO_LIVE_MIN_SETTLED)
     rep.add_argument("--floor-bps", type=float, default=GO_LIVE_REALIZED_FLOOR_BPS)
 
+    log_p = sub.add_parser("log")
+    log_p.add_argument("--horizon", type=str, default=None, choices=["1d", "5d", "10d"])
+    log_p.add_argument("--status", type=str, default=None, choices=["OPEN", "SETTLED"])
+    log_p.add_argument("--limit", type=int, default=50)
+
     args = parser.parse_args()
     settings = load_settings()
 
@@ -168,6 +232,9 @@ def main() -> int:
     if args.command == "report":
         return cmd_report(settings, min_settled=args.min_settled,
                           floor_bps=args.floor_bps)
+    if args.command == "log":
+        return cmd_log(settings, horizon=args.horizon,
+                       status=args.status, limit=args.limit)
     return 1
 
 

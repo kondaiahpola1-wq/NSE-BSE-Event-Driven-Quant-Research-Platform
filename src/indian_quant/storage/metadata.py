@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -28,10 +30,10 @@ class MetadataStore:
         self._con = sqlite3.connect(path)
         self._con.row_factory = sqlite3.Row
         self._migrate()
+        self._migrate_portfolio()
 
     def _migrate(self) -> None:
-        self._con.executescript(
-            """
+        self._con.executescript("""
             CREATE TABLE IF NOT EXISTS instruments (
                 instrument_id TEXT PRIMARY KEY,
                 exchange TEXT NOT NULL,
@@ -187,8 +189,48 @@ class MetadataStore:
             );
             CREATE INDEX IF NOT EXISTS idx_ws_signals_user ON watchlist_signals(user_id);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_ws_signals_unique ON watchlist_signals(watchlist_id);
-            """
-        )
+        """)
+        self._con.commit()
+
+    def _migrate_portfolio(self) -> None:
+        """Add portfolio management columns to existing tables."""
+        cur = self._con.execute("PRAGMA table_info(paper_signals)")
+        existing = {r[1] for r in cur.fetchall()}
+        new_cols = {
+            "entry_date": "TEXT",
+            "days_held": "INTEGER DEFAULT 0",
+            "position_value": "REAL DEFAULT 0",
+            "risk_amount": "REAL DEFAULT 0",
+            "return_pct": "REAL",
+            "return_bps": "REAL",
+            "horizon_label": "TEXT DEFAULT '10d'",
+            "capital_allocated": "REAL DEFAULT 0",
+            "exit_reason": "TEXT",
+            "max_drawdown_bps": "REAL",
+            "peak_return_bps": "REAL",
+        }
+        for col, typedef in new_cols.items():
+            if col not in existing:
+                self._con.execute(f"ALTER TABLE paper_signals ADD COLUMN {col} {typedef}")
+
+        cur2 = self._con.execute("PRAGMA table_info(daily_suggestions)")
+        existing2 = {r[1] for r in cur2.fetchall()}
+        new_cols2 = {
+            "entry_date": "TEXT",
+            "days_held": "INTEGER DEFAULT 0",
+            "position_value": "REAL DEFAULT 0",
+            "risk_amount": "REAL DEFAULT 0",
+            "return_pct": "REAL",
+            "return_bps": "REAL",
+            "horizon_label": "TEXT DEFAULT '10d'",
+            "capital_allocated": "REAL DEFAULT 0",
+            "exit_reason": "TEXT",
+            "max_drawdown_bps": "REAL",
+            "peak_return_bps": "REAL",
+        }
+        for col, typedef in new_cols2.items():
+            if col not in existing2:
+                self._con.execute(f"ALTER TABLE daily_suggestions ADD COLUMN {col} {typedef}")
         self._con.commit()
 
     def register_instrument(self, identity: dict[str, Any]) -> None:
@@ -279,14 +321,22 @@ class MetadataStore:
 
     def record_paper_signal(self, *, symbol: str, close_at_signal: float, qty: int,
                             horizon_days: int, stop_pct: float, segment: str | None = None,
-                            side: str = "BUY", note: str | None = None) -> int:
+                            side: str = "BUY", note: str | None = None,
+                            entry_date: str | None = None,
+                            position_value: float = 0.0,
+                            risk_amount: float = 0.0,
+                            horizon_label: str = "10d",
+                            capital_allocated: float = 0.0) -> int:
         cur = self._con.execute(
             """INSERT INTO paper_signals
                (created_at, symbol, segment, side, close_at_signal, qty,
-                horizon_days, stop_pct, status, note)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?)""",
+                horizon_days, stop_pct, status, note,
+                entry_date, position_value, risk_amount, horizon_label, capital_allocated)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?)""",
             (_now(), symbol.upper(), segment, side, close_at_signal, qty,
-             horizon_days, stop_pct, note),
+             horizon_days, stop_pct, note,
+             entry_date or _now()[:10], position_value, risk_amount,
+             horizon_label, capital_allocated),
         )
         self._con.commit()
         return int(cur.lastrowid or 0)
@@ -298,7 +348,8 @@ class MetadataStore:
         return [dict(r) for r in rows]
 
     def settle_paper_signal(self, paper_id: int, *, exit_date: str,
-                            exit_close: float, cost_bps: float = 107.0) -> dict:
+                            exit_close: float, cost_bps: float = 107.0,
+                            exit_reason: str = "HORIZON") -> dict:
         row = self._con.execute(
             "SELECT * FROM paper_signals WHERE id=?", (paper_id,)).fetchone()
         if not row:
@@ -307,15 +358,25 @@ class MetadataStore:
         sign = 1.0 if p["side"] == "BUY" else -1.0
         gross_bps = (exit_close / p["close_at_signal"] - 1.0) * 10_000 * sign
         net_bps = gross_bps - cost_bps
+        return_pct = (exit_close / p["close_at_signal"] - 1.0) * 100 * sign
+        entry_dt = p.get("entry_date") or p["created_at"][:10]
+        try:
+            days_held = len(pd.bdate_range(entry_dt, exit_date))
+        except Exception:
+            days_held = 0
         self._con.execute(
             """UPDATE paper_signals SET status='SETTLED', exit_date=?,
-               exit_close=?, realized_net_bps=? WHERE id=?""",
-            (exit_date, exit_close, round(net_bps, 2), paper_id),
+               exit_close=?, realized_net_bps=?, exit_reason=?,
+               return_pct=?, return_bps=?, days_held=? WHERE id=?""",
+            (exit_date, exit_close, round(net_bps, 2), exit_reason,
+             round(return_pct, 2), round(net_bps, 2), days_held, paper_id),
         )
         self._con.commit()
         return {"id": paper_id, "symbol": p["symbol"],
                 "gross_bps": round(gross_bps, 2),
-                "realized_net_bps": round(net_bps, 2)}
+                "realized_net_bps": round(net_bps, 2),
+                "return_pct": round(return_pct, 2),
+                "days_held": days_held, "exit_reason": exit_reason}
 
     def papers_summary(self) -> dict:
         settled = self._con.execute(
@@ -324,10 +385,28 @@ class MetadataStore:
                FROM paper_signals WHERE status='SETTLED'""").fetchone()
         open_n = self._con.execute(
             "SELECT COUNT(*) FROM paper_signals WHERE status='OPEN'").fetchone()[0]
-        return {"settled": settled["n"], "avg_net_bps": round(settled["avg_net"], 1)
-                if settled["avg_net"] is not None else None,
-                "hit_rate": round(settled["hit"], 3) if settled["hit"] is not None else None,
-                "open": open_n}
+        by_horizon = self._con.execute(
+            """SELECT horizon_label, COUNT(*) n,
+               AVG(realized_net_bps) avg_net,
+               SUM(realized_net_bps > 0)*1.0/COUNT(*) hit,
+               AVG(days_held) avg_days
+               FROM paper_signals WHERE status='SETTLED'
+               GROUP BY horizon_label ORDER BY horizon_label"""
+        ).fetchall()
+        return {
+            "settled": settled["n"],
+            "avg_net_bps": round(settled["avg_net"], 1)
+            if settled["avg_net"] is not None else None,
+            "hit_rate": round(settled["hit"], 3) if settled["hit"] is not None else None,
+            "open": open_n,
+            "by_horizon": [
+                {"label": r["horizon_label"] or "10d", "n": r["n"],
+                 "avg_net_bps": round(r["avg_net"], 1) if r["avg_net"] else None,
+                 "hit_rate": round(r["hit"], 3) if r["hit"] else None,
+                 "avg_days": round(r["avg_days"], 1) if r["avg_days"] else None}
+                for r in by_horizon
+            ],
+        }
 
     def record_daily_suggestion(self, *, suggestion_date: str, symbol: str,
                                 segment: str, signal_type: str,
@@ -371,19 +450,30 @@ class MetadataStore:
         col_names = [d[0] for d in self._con.execute("SELECT * FROM daily_suggestions LIMIT 0").description]
         s = dict(zip(col_names, row, strict=False))
         gross_bps = (exit_close / s["close_at_signal"] - 1.0) * 10_000
-        net_bps = gross_bps - 107.0  # measured round-trip cost
+        net_bps = gross_bps - 107.0
+        return_pct = (exit_close / s["close_at_signal"] - 1.0) * 100
         predicted = s.get("predicted_return_bps")
         hit = (net_bps > 0) if predicted is None else ((net_bps > 0) == (predicted > 0))
+        entry_dt = s.get("entry_date") or s["suggestion_date"]
+        try:
+            days_held = len(pd.bdate_range(entry_dt, exit_date))
+        except Exception:
+            days_held = 0
+        exit_reason = "HORIZON"
         self._con.execute(
             """UPDATE daily_suggestions SET status='REALIZED',
                actual_exit_date=?, actual_exit_close=?,
-               actual_return_bps=?, hit=? WHERE id=?""",
-            (exit_date, exit_close, round(net_bps, 1), int(hit), suggestion_id),
+               actual_return_bps=?, hit=?, exit_reason=?,
+               return_pct=?, return_bps=?, days_held=? WHERE id=?""",
+            (exit_date, exit_close, round(net_bps, 1), int(hit),
+             exit_reason, round(return_pct, 2), round(net_bps, 2),
+             days_held, suggestion_id),
         )
         self._con.commit()
         return {
             "id": suggestion_id, "symbol": s["symbol"],
             "actual_net_bps": round(net_bps, 1), "hit": bool(hit),
+            "return_pct": round(return_pct, 2), "days_held": days_held,
         }
 
     def suggestions_summary(self) -> dict:
@@ -460,6 +550,104 @@ class MetadataStore:
             elif event["from_symbol"] and symbol is None:
                 symbol = event["from_symbol"]
         return symbol
+
+    def trade_log(self, *, horizon: str | None = None, status: str | None = None,
+                  limit: int = 200) -> list[dict]:
+        """Full trade log from paper_signals with all portfolio fields."""
+        q = "SELECT * FROM paper_signals WHERE 1=1"
+        params: list = []
+        if horizon:
+            q += " AND horizon_label=?"
+            params.append(horizon)
+        if status:
+            q += " AND status=?"
+            params.append(status)
+        q += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self._con.execute(q, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def portfolio_summary(self) -> dict:
+        """Aggregated portfolio stats across all horizons."""
+        total = self._con.execute(
+            """SELECT COUNT(*) n, AVG(realized_net_bps) avg_net,
+               SUM(realized_net_bps > 0)*1.0/COUNT(*) hit,
+               AVG(days_held) avg_days,
+               SUM(CASE WHEN exit_reason='STOP' THEN 1 ELSE 0 END) stops,
+               SUM(CASE WHEN exit_reason='HORIZON' THEN 1 ELSE 0 END) horizons,
+               MIN(realized_net_bps) worst_bps, MAX(realized_net_bps) best_bps
+               FROM paper_signals WHERE status='SETTLED'""").fetchone()
+        open_pos = self._con.execute(
+            "SELECT COUNT(*) FROM paper_signals WHERE status='OPEN'").fetchone()[0]
+        total_value = self._con.execute(
+            "SELECT SUM(position_value) FROM paper_signals WHERE status='OPEN'"
+        ).fetchone()[0] or 0
+        total_risk = self._con.execute(
+            "SELECT SUM(risk_amount) FROM paper_signals WHERE status='OPEN'"
+        ).fetchone()[0] or 0
+        return {
+            "total_trades": total["n"] or 0,
+            "open_positions": open_pos,
+            "avg_net_bps": round(total["avg_net"], 1) if total["avg_net"] else None,
+            "hit_rate": round(total["hit"], 3) if total["hit"] else None,
+            "avg_days_held": round(total["avg_days"], 1) if total["avg_days"] else None,
+            "stops": total["stops"] or 0,
+            "horizon_exits": total["horizons"] or 0,
+            "worst_bps": round(total["worst_bps"], 1) if total["worst_bps"] else None,
+            "best_bps": round(total["best_bps"], 1) if total["best_bps"] else None,
+            "total_position_value": round(total_value, 2),
+            "total_risk": round(total_risk, 2),
+        }
+
+    def paper_trades_by_horizon(self) -> dict[str, dict]:
+        """Per-horizon breakdown of paper trades."""
+        rows = self._con.execute(
+            """SELECT horizon_label,
+                      COUNT(*) total,
+                      SUM(CASE WHEN status='SETTLED' THEN 1 ELSE 0 END) settled,
+                      SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) open_n,
+                      AVG(CASE WHEN status='SETTLED' THEN realized_net_bps END) avg_net,
+                      SUM(CASE WHEN status='SETTLED' AND realized_net_bps > 0 THEN 1 ELSE 0 END)*1.0
+                        / NULLIF(SUM(CASE WHEN status='SETTLED' THEN 1 ELSE 0 END), 0) hit_rate,
+                      AVG(CASE WHEN status='SETTLED' THEN days_held END) avg_days
+               FROM paper_signals GROUP BY horizon_label ORDER BY horizon_label"""
+        ).fetchall()
+        result = {}
+        for r in rows:
+            label = r["horizon_label"] or "10d"
+            result[label] = {
+                "total": r["total"], "settled": r["settled"],
+                "open": r["open_n"],
+                "avg_net_bps": round(r["avg_net"], 1) if r["avg_net"] else None,
+                "hit_rate": round(r["hit_rate"], 3) if r["hit_rate"] else None,
+                "avg_days_held": round(r["avg_days"], 1) if r["avg_days"] else None,
+            }
+        return result
+
+    def suggestions_by_horizon(self) -> dict[str, dict]:
+        """Per-horizon breakdown of daily suggestions."""
+        rows = self._con.execute(
+            """SELECT horizon_days,
+                      COUNT(*) total,
+                      SUM(CASE WHEN status='REALIZED' THEN 1 ELSE 0 END) realized,
+                      SUM(CASE WHEN status='PENDING' THEN 1 ELSE 0 END) pending,
+                      AVG(CASE WHEN status='REALIZED' THEN actual_return_bps END) avg_net,
+                      SUM(CASE WHEN status='REALIZED' AND hit=1 THEN 1 ELSE 0 END)*1.0
+                        / NULLIF(SUM(CASE WHEN status='REALIZED' THEN 1 ELSE 0 END), 0) hit_rate,
+                      AVG(CASE WHEN status='REALIZED' THEN days_held END) avg_days
+               FROM daily_suggestions GROUP BY horizon_days ORDER BY horizon_days"""
+        ).fetchall()
+        result = {}
+        for r in rows:
+            label = f"{r['horizon_days']}d"
+            result[label] = {
+                "total": r["total"], "realized": r["realized"],
+                "pending": r["pending"],
+                "avg_net_bps": round(r["avg_net"], 1) if r["avg_net"] else None,
+                "hit_rate": round(r["hit_rate"], 3) if r["hit_rate"] else None,
+                "avg_days_held": round(r["avg_days"], 1) if r["avg_days"] else None,
+            }
+        return result
 
     def close(self) -> None:
         self._con.close()

@@ -1,22 +1,95 @@
 {% extends "base.html" %}
-{% block title %}Positions{% endblock %}
+{% block title %}Portfolio{% endblock %}
 {% block nav_positions %}active{% endblock %}
 {% block content %}
-<h1>Paper Positions</h1>
+<h1>Portfolio Manager</h1>
 
+<div class="section-title">Overall Summary</div>
 <div class="grid grid-4">
-  <div class="card"><div class="label">Open</div><div class="value neutral">{{ papers.open }}</div></div>
-  <div class="card"><div class="label">Settled</div><div class="value">{{ papers.settled }}</div></div>
-  <div class="card"><div class="label">Avg Net BPS</div><div class="value">{{ papers.avg_net_bps if papers.avg_net_bps is not none else '—' }}</div></div>
-  <div class="card"><div class="label">Hit Rate</div><div class="value">{{ (papers.hit_rate * 100)|round(1) if papers.hit_rate else '—' }}%</div></div>
+  <div class="card"><div class="label">Total Trades</div><div class="value">{{ pf.total_trades }}</div></div>
+  <div class="card"><div class="label">Open Positions</div><div class="value neutral">{{ pf.open_positions }}</div></div>
+  <div class="card"><div class="label">Hit Rate</div><div class="value {% if pf.hit_rate and pf.hit_rate > 0.5 %}good{% elif pf.hit_rate and pf.hit_rate < 0.4 %}bad{% else %}neutral{% endif %}">{{ (pf.hit_rate * 100)|round(1) if pf.hit_rate else '—' }}%</div></div>
+  <div class="card"><div class="label">Avg Net BPS</div><div class="value {% if pf.avg_net_bps and pf.avg_net_bps > 0 %}good{% elif pf.avg_net_bps and pf.avg_net_bps < 0 %}bad{% else %}neutral{% endif %}">{{ pf.avg_net_bps if pf.avg_net_bps is not none else '—' }}</div></div>
+</div>
+<div class="grid grid-4" style="margin-top:12px">
+  <div class="card"><div class="label">Avg Days Held</div><div class="value">{{ pf.avg_days_held if pf.avg_days_held else '—' }}</div></div>
+  <div class="card"><div class="label">Best Trade</div><div class="value good">{{ pf.best_bps if pf.best_bps is not none else '—' }} bps</div></div>
+  <div class="card"><div class="label">Worst Trade</div><div class="value bad">{{ pf.worst_bps if pf.worst_bps is not none else '—' }} bps</div></div>
+  <div class="card"><div class="label">Stops / Horizon</div><div class="value">{{ pf.stops }} / {{ pf.horizon_exits }}</div></div>
+</div>
+<div class="grid grid-4" style="margin-top:12px">
+  <div class="card"><div class="label">Position Value (Open)</div><div class="value">₹{{ '{:,.0f}'.format(pf.total_position_value) }}</div></div>
+  <div class="card"><div class="label">Total Risk (Open)</div><div class="value warn">₹{{ '{:,.0f}'.format(pf.total_risk) }}</div></div>
+  <div class="card"><div class="label">Capital at Risk</div><div class="value">{{ ((pf.total_risk / 25000) * 100)|round(1) if pf.total_risk else '—' }}%</div></div>
+  <div class="card"><div class="label">Avg Return %</div><div class="value {% if pf.avg_net_bps and pf.avg_net_bps > 0 %}good{% elif pf.avg_net_bps and pf.avg_net_bps < 0 %}bad{% else %}neutral{% endif %}">{{ ((pf.avg_net_bps or 0) / 100)|round(2) if pf.avg_net_bps else '—' }}%</div></div>
 </div>
 
-{% if papers.open_positions %}
-<h2>Open Positions</h2>
-<table><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Qty</th><th>Stop %</th><th>Horizon</th><th>Note</th></tr>
-{% for p in papers.open_positions %}
-<tr><td class="mono" style="color:var(--green)"><a href="/stock/{{ p.symbol }}" target="_blank" style="color:var(--green);text-decoration:underline">{{ p.symbol }}</a></td><td>{{ p.side }}</td><td class="mono">₹{{ '%.2f'|format(p.close_at_signal) }}</td><td>{{ p.qty }}</td><td>{{ (p.stop_pct * 100)|int }}%</td><td>{{ p.horizon_days }}d</td><td class="mono" style="font-size:11px;color:var(--dim)">{{ p.note or '' }}</td></tr>
-{% endfor %}</table>
+<div class="section-title">By Time Horizon</div>
+<div class="grid grid-4">
+  {% for label, hz in by_hz.items() %}
+  <div class="card">
+    <div class="label">{{ label }} {% if label == '1d' %}Scalp{% elif label == '5d' %}Swing{% else %}Position{% endif %}</div>
+    <div class="value" style="font-size:22px">{{ hz.settled }} settled / {{ hz.open }} open</div>
+    <div class="sub">
+      avg <span class="{% if hz.avg_net_bps and hz.avg_net_bps > 0 %}good{% elif hz.avg_net_bps and hz.avg_net_bps < 0 %}bad{% endif %}">{{ hz.avg_net_bps if hz.avg_net_bps is not none else '—' }}bps</span>
+      · hit {{ (hz.hit_rate * 100)|round(1) if hz.hit_rate else '—' }}%
+      · avg {{ hz.avg_days_held|round(0) if hz.avg_days_held else '—' }}d
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="filter-bar" style="margin-top:20px">
+  <span style="color:var(--faint);font-size:12px;font-family:var(--mono)">FILTER</span>
+  <a class="filter-btn {% if not filter_horizon %}active{% endif %}" href="/positions">All</a>
+  <a class="filter-btn {% if filter_horizon == '1d' %}active{% endif %}" href="/positions?horizon=1d">1d Scalp</a>
+  <a class="filter-btn {% if filter_horizon == '5d' %}active{% endif %}" href="/positions?horizon=5d">5d Swing</a>
+  <a class="filter-btn {% if filter_horizon == '10d' %}active{% endif %}" href="/positions?horizon=10d">10d Position</a>
+  <div class="filter-sep"></div>
+  <a class="filter-btn {% if filter_status == 'OPEN' %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}&status=OPEN">Open</a>
+  <a class="filter-btn {% if filter_status == 'SETTLED' %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}&status=SETTLED">Settled</a>
+</div>
+
+<div class="section-title">Trade Log ({{ trades|length }} trades)</div>
+{% if trades %}
+<table>
+<tr>
+  <th>Symbol</th>
+  <th>Horizon</th>
+  <th>Status</th>
+  <th>Entry Date</th>
+  <th>Entry Price</th>
+  <th>Exit Date</th>
+  <th>Exit Price</th>
+  <th>Qty</th>
+  <th>Position ₹</th>
+  <th>Risk ₹</th>
+  <th>Days</th>
+  <th>Return %</th>
+  <th>Net BPS</th>
+  <th>Exit Reason</th>
+</tr>
+{% for t in trades %}
+<tr>
+  <td class="mono" style="color:var(--green)"><a href="/stock/{{ t.symbol }}" target="_blank" style="color:var(--green);text-decoration:underline">{{ t.symbol }}</a></td>
+  <td><span class="badge {% if t.horizon_label == '1d' %}badge-orange{% elif t.horizon_label == '5d' %}badge-green{% else %}badge-green{% endif %}">{{ t.horizon_label or '?' }}</span></td>
+  <td><span class="badge {% if t.status == 'OPEN' %}badge-orange{% else %}badge-green{% endif %}">{{ t.status }}</span></td>
+  <td class="mono" style="font-size:12px">{{ (t.entry_date or t.created_at or '')[:10] }}</td>
+  <td class="mono">₹{{ '%.2f'|format(t.close_at_signal) }}</td>
+  <td class="mono" style="font-size:12px">{{ (t.exit_date or '—')[:10] }}</td>
+  <td class="mono">{% if t.exit_close %}₹{{ '%.2f'|format(t.exit_close) }}{% else %}—{% endif %}</td>
+  <td>{{ t.qty }}</td>
+  <td class="mono">₹{{ '{:,.0f}'.format(t.position_value) }}</td>
+  <td class="mono warn">₹{{ '{:,.0f}'.format(t.risk_amount) }}</td>
+  <td>{{ t.days_held or '—' }}</td>
+  <td class="{% if t.return_pct and t.return_pct > 0 %}good{% elif t.return_pct and t.return_pct < 0 %}bad{% endif %} mono">{% if t.return_pct is not none %}{{ '%+.1f'|format(t.return_pct) }}%{% else %}—{% endif %}</td>
+  <td class="{% if t.realized_net_bps and t.realized_net_bps > 0 %}good{% elif t.realized_net_bps and t.realized_net_bps < 0 %}bad{% endif %} mono">{% if t.realized_net_bps is not none %}{{ '%+.0f'|format(t.realized_net_bps) }}bps{% else %}—{% endif %}</td>
+  <td>{% if t.exit_reason %}<span class="badge {% if t.exit_reason == 'STOP' %}badge-red{% else %}badge-green{% endif %}">{{ t.exit_reason }}</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</table>
+{% else %}
+<div class="empty">No trades yet — run paper_track.py snapshot to start</div>
 {% endif %}
 
 {% endblock %}
