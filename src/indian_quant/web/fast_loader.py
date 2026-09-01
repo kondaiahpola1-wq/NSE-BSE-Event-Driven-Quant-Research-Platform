@@ -164,6 +164,15 @@ def get_signals_for_api(
         "entry_zone_low", "entry_zone_high", "stop_loss", "target_price",
         "market_cap_cr", "market_cap_class", "_score",
         "conviction_score", "kelly_fraction",
+        # Fundamental fields
+        "pe_trailing", "price_to_book", "roe", "debt_to_equity",
+        "profit_margin", "revenue_growth", "dividend_yield",
+        "sector", "industry", "company_name", "fundamental_score",
+        # Institutional fields
+        "fii_pct", "dii_pct", "promoter_pct", "pledge_pct",
+        "institutional_score",
+        # Professional composite
+        "professional_score",
     ]
     page_signals = []
     for s in all_signals[start:end]:

@@ -349,6 +349,180 @@ def warm_redis_from_pg() -> int:
     return len(signals)
 
 
+# ── ENRICHMENT: Fundamentals + Institutional + Sectors ──
+
+def enrich_with_fundamentals(signals: list[dict]) -> list[dict]:
+    """Enrich signals with fundamental data from PostgreSQL."""
+    engine = get_pg_engine()
+
+    # Bulk load key_ratios and company_profile
+    try:
+        kr_df = pd.read_sql(
+            "SELECT symbol, pe_trailing, price_to_book, roe, debt_to_equity, "
+            "profit_margin, revenue_growth, dividend_yield, beta, "
+            "ev_to_ebitda, current_ratio, market_cap "
+            "FROM key_ratios", engine
+        )
+        kr_dict = kr_df.set_index("symbol").to_dict(orient="index")
+    except Exception:
+        kr_dict = {}
+
+    try:
+        cp_df = pd.read_sql(
+            "SELECT symbol, sector, industry, company_name FROM company_profile", engine
+        )
+        cp_dict = cp_df.set_index("symbol").to_dict(orient="index")
+    except Exception:
+        cp_dict = {}
+
+    for sig in signals:
+        symbol = sig.get("symbol", "")
+        kr = kr_dict.get(symbol, {})
+        cp = cp_dict.get(symbol, {})
+
+        # Add fundamental fields
+        sig["pe_trailing"] = kr.get("pe_trailing")
+        sig["price_to_book"] = kr.get("price_to_book")
+        sig["roe"] = kr.get("roe")
+        sig["debt_to_equity"] = kr.get("debt_to_equity")
+        sig["profit_margin"] = kr.get("profit_margin")
+        sig["revenue_growth"] = kr.get("revenue_growth")
+        sig["dividend_yield"] = kr.get("dividend_yield")
+        sig["ev_to_ebitda"] = kr.get("ev_to_ebitda")
+        sig["current_ratio"] = kr.get("current_ratio")
+
+        # Add sector/industry
+        sig["sector"] = cp.get("sector")
+        sig["industry"] = cp.get("industry")
+        sig["company_name"] = cp.get("company_name")
+
+        # Compute fundamental score (0-1)
+        fund_score = 0.0
+        pe = sig.get("pe_trailing")
+        if pe is not None and 5 < pe < 25:
+            fund_score += 0.15
+        elif pe is not None and 25 < pe < 40:
+            fund_score += 0.05
+
+        roe = sig.get("roe")
+        if roe is not None and roe > 20:
+            fund_score += 0.15
+        elif roe is not None and roe > 12:
+            fund_score += 0.08
+
+        de = sig.get("debt_to_equity")
+        if de is not None and de < 0.5:
+            fund_score += 0.10
+        elif de is not None and de < 1.0:
+            fund_score += 0.05
+
+        margin = sig.get("profit_margin")
+        if margin is not None and margin > 15:
+            fund_score += 0.10
+
+        growth = sig.get("revenue_growth")
+        if growth is not None and growth > 0.15:
+            fund_score += 0.10
+
+        div_yield = sig.get("dividend_yield")
+        if div_yield is not None and div_yield > 0.02:
+            fund_score += 0.05
+
+        sig["fundamental_score"] = round(min(fund_score, 1.0), 4)
+
+    return signals
+
+
+def enrich_with_institutional(signals: list[dict]) -> list[dict]:
+    """Enrich signals with institutional flow data from PostgreSQL."""
+    engine = get_pg_engine()
+
+    try:
+        sh_df = pd.read_sql(
+            "SELECT symbol, promoter_pct, fii_pct, dii_pct, "
+            "promoter_chg, fii_chg, dii_chg "
+            "FROM shareholding_history "
+            "WHERE quarter = (SELECT MAX(quarter) FROM shareholding_history)",
+            engine
+        )
+        sh_dict = sh_df.set_index("symbol").to_dict(orient="index")
+    except Exception:
+        sh_dict = {}
+
+    try:
+        pp_df = pd.read_sql(
+            "SELECT symbol, pledge_pct FROM promoter_pledge", engine
+        )
+        pp_dict = pp_df.set_index("symbol").to_dict(orient="index")
+    except Exception:
+        pp_dict = {}
+
+    for sig in signals:
+        symbol = sig.get("symbol", "")
+        sh = sh_dict.get(symbol, {})
+        pp = pp_dict.get(symbol, {})
+
+        sig["fii_pct"] = sh.get("fii_pct")
+        sig["dii_pct"] = sh.get("dii_pct")
+        sig["promoter_pct"] = sh.get("promoter_pct")
+        sig["fii_chg"] = sh.get("fii_chg")
+        sig["dii_chg"] = sh.get("dii_chg")
+        sig["promoter_chg"] = sh.get("promoter_chg")
+        sig["pledge_pct"] = pp.get("pledge_pct")
+
+        # Compute institutional score (0-1)
+        inst_score = 0.0
+
+        fii_chg = sig.get("fii_chg")
+        if fii_chg is not None and fii_chg > 0:
+            inst_score += 0.20
+        elif fii_chg is not None and fii_chg == 0:
+            inst_score += 0.05
+
+        dii_chg = sig.get("dii_chg")
+        if dii_chg is not None and dii_chg > 0:
+            inst_score += 0.15
+
+        promoter_chg = sig.get("promoter_chg")
+        if promoter_chg is not None and promoter_chg >= 0:
+            inst_score += 0.20
+
+        pledge = sig.get("pledge_pct")
+        if pledge is not None and pledge < 5:
+            inst_score += 0.25
+        elif pledge is not None and pledge < 15:
+            inst_score += 0.15
+        elif pledge is not None and pledge < 25:
+            inst_score += 0.05
+
+        fii_pct = sig.get("fii_pct")
+        if fii_pct is not None and fii_pct > 20:
+            inst_score += 0.10
+        elif fii_pct is not None and fii_pct > 10:
+            inst_score += 0.05
+
+        sig["institutional_score"] = round(min(inst_score, 1.0), 4)
+
+    return signals
+
+
+def compute_professional_score(signals: list[dict]) -> list[dict]:
+    """Compute composite professional score combining all layers."""
+    for sig in signals:
+        # Existing conviction score (delivery + momentum + vol + technicals)
+        base = sig.get("conviction_score", 0.0)
+
+        # Fundamental and institutional scores
+        fund = sig.get("fundamental_score", 0.0)
+        inst = sig.get("institutional_score", 0.0)
+
+        # Composite: 55% base + 25% fundamentals + 20% institutional
+        prof_score = (base * 0.55) + (fund * 0.25) + (inst * 0.20)
+        sig["professional_score"] = round(min(prof_score, 1.0), 4)
+
+    return signals
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Cache delivery signals")
     parser.add_argument(
@@ -415,8 +589,13 @@ def main() -> int:
         if s.get("segment") == "SME" and s.get("market_cap_class") != "SME":
             s["market_cap_class"] = "SME"
 
-    # enrich MCP corporate actions (skipped — MCP NSE API blocked from datacenter IPs)
-    # signals = enrich_with_corporate_actions(signals, router)
+    # Enrich with fundamentals + institutional data
+    try:
+        signals = enrich_with_fundamentals(signals)
+        signals = enrich_with_institutional(signals)
+        signals = compute_professional_score(signals)
+    except Exception as e:
+        print(f"Warning: enrichment failed (non-fatal): {e}", flush=True)
 
     elapsed_scan = time.time() - t0
 

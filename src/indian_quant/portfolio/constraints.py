@@ -59,6 +59,63 @@ def can_enter(symbol: str, sector: str, entry_date: str,
     # Min days between same-stock entries (check recent exits — not applicable for entry)
     # This is checked at exit time to enforce cooldown
 
+    # ── Risk checks (appended, non-breaking) ──
+    # These are advisory checks — can be called with stock_risk=None to skip
+
+    return True, "ok"
+
+
+def can_enter_with_risk(symbol: str, sector: str, entry_date: str,
+                        open_positions: dict[str, OpenPosition],
+                        constraints: PortfolioConstraints,
+                        stock_risk: dict | None = None,
+                        portfolio_risk: dict | None = None) -> tuple[bool, str]:
+    """Enhanced entry check with risk management.
+
+    Includes all basic checks plus:
+    - VaR budget check (position VaR + portfolio VaR < limit)
+    - Sector concentration with risk awareness
+    - Liquidity/impact cost check
+    - Drawdown circuit breaker
+
+    stock_risk: from stock_risk table (beta, vol_30d, var_95, impact_cost)
+    portfolio_risk: from portfolio_risk table (var_95, max_drawdown)
+    """
+    # Run basic checks first
+    allowed, reason = can_enter(symbol, sector, entry_date, open_positions, constraints)
+    if not allowed:
+        return allowed, reason
+
+    # Risk checks (only if risk data available)
+    if stock_risk:
+        # VaR check: single position shouldn't contribute more than 1% VaR
+        pos_var = stock_risk.get("var_95", 0)
+        if pos_var is not None and pos_var < -0.03:  # > 3% daily loss potential
+            return False, f"VaR95={pos_var:.2%} exceeds 3% limit"
+
+        # Impact cost check: avoid illiquid stocks
+        impact = stock_risk.get("impact_cost", 0)
+        if impact is not None and impact > 75000:  # > ₹75K impact for ₹5L order
+            return False, f"impact cost ₹{impact:,.0f} too high (illiquid)"
+
+        # Volatility check: avoid extremely volatile stocks
+        vol = stock_risk.get("vol_annual", 0)
+        if vol is not None and vol > 0.80:  # > 80% annualized vol
+            return False, f"volatility {vol:.0%} too high"
+
+    if portfolio_risk:
+        # Portfolio drawdown circuit breaker
+        dd = portfolio_risk.get("max_drawdown", 0)
+        if dd is not None and dd < -0.08:  # > 8% drawdown
+            return False, f"portfolio drawdown {dd:.1%} — halt new entries"
+
+        # Portfolio VaR budget
+        port_var = portfolio_risk.get("var_95", 0)
+        if stock_risk and port_var is not None:
+            pos_var = stock_risk.get("var_95", 0) or 0
+            if port_var + pos_var < -0.04:  # Combined > 4% daily VaR
+                return False, f"VaR budget: portfolio {port_var:.2%} + position {pos_var:.2%} > 4%"
+
     return True, "ok"
 
 

@@ -218,6 +218,15 @@ def evening_cycle() -> None:
          timeout=300)
     _run("cache_rebuild", [str(VENV_PYTHON), "scripts/cache_signals.py"],
          timeout=300)
+    # Professional quant layer: fundamentals, institutional, sectors, risk
+    _run("ingest_fundamentals", [str(VENV_PYTHON), "scripts/ingest_fundamentals.py",
+         "--recent"], timeout=600)
+    _run("ingest_institutional", [str(VENV_PYTHON), "scripts/ingest_institutional.py",
+         "--daily"], timeout=300)
+    _run("ingest_sectors", [str(VENV_PYTHON), "scripts/ingest_sectors.py"],
+         timeout=300)
+    _run("compute_risk", [str(VENV_PYTHON), "scripts/compute_risk.py"],
+         timeout=300)
     _run("sugg_settle", [str(VENV_PYTHON), "scripts/suggestion_manager.py", "settle"],
          timeout=60)
     _run("sugg_record", [str(VENV_PYTHON), "scripts/suggestion_manager.py", "record"],

@@ -191,6 +191,22 @@ async def research_page(request: Request):
     })
 
 
+@app.get("/sectors", response_class=HTMLResponse)
+async def sectors_page(request: Request):
+    return templates.TemplateResponse(request, "sectors.html", {
+        "request": request,
+        "username": get_current_username(request),
+    })
+
+
+@app.get("/risk", response_class=HTMLResponse)
+async def risk_page(request: Request):
+    return templates.TemplateResponse(request, "risk.html", {
+        "request": request,
+        "username": get_current_username(request),
+    })
+
+
 @app.get("/suggestions", response_class=HTMLResponse)
 async def suggestions_page(request: Request):
     settings = dl._settings()
@@ -485,6 +501,185 @@ async def api_search_stocks(q: str = "", limit: int = 20):
             pass
 
     return JSONResponse(matches[:limit])
+
+
+# ── Professional Quant Layer API Endpoints ──
+
+import math
+from datetime import datetime, date
+
+def _clean_nan(obj):
+    """Convert NaN/Inf floats and datetime to JSON-safe values."""
+    if isinstance(obj, float):
+        return None if math.isnan(obj) or math.isinf(obj) else obj
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _clean_nan(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_clean_nan(v) for v in obj]
+    return obj
+
+
+@app.get("/api/fundamentals/{symbol}")
+async def api_fundamentals(symbol: str):
+    """Get fundamental data for a stock."""
+    import sqlalchemy as sa
+    from indian_quant.web.prod_config import get_pg_engine
+    engine = get_pg_engine()
+    symbol = symbol.upper()
+
+    with engine.connect() as conn:
+        # Key ratios
+        kr = conn.execute(
+            sa.text("SELECT * FROM key_ratios WHERE symbol = :s"), {"s": symbol}
+        ).mappings().fetchone()
+
+        # Company profile
+        cp = conn.execute(
+            sa.text("SELECT * FROM company_profile WHERE symbol = :s"), {"s": symbol}
+        ).mappings().fetchone()
+
+        # Quarterly financials
+        qf = conn.execute(
+            sa.text("SELECT * FROM quarterly_financials WHERE symbol = :s ORDER BY period DESC LIMIT 8"),
+            {"s": symbol}
+        ).mappings().fetchall()
+
+    result = {
+        "symbol": symbol,
+        "key_ratios": dict(kr) if kr else None,
+        "company_profile": dict(cp) if cp else None,
+        "quarterly_financials": [dict(q) for q in qf],
+    }
+    return JSONResponse(_clean_nan(result))
+
+
+@app.get("/api/institutional/{symbol}")
+async def api_institutional(symbol: str):
+    """Get institutional flow data for a stock."""
+    import sqlalchemy as sa
+    from indian_quant.web.prod_config import get_pg_engine
+    engine = get_pg_engine()
+    symbol = symbol.upper()
+
+    with engine.connect() as conn:
+        # Shareholding history
+        sh = conn.execute(
+            sa.text("SELECT * FROM shareholding_history WHERE symbol = :s ORDER BY quarter DESC LIMIT 4"),
+            {"s": symbol}
+        ).mappings().fetchall()
+
+        # Insider trades
+        it = conn.execute(
+            sa.text("SELECT * FROM insider_trades WHERE symbol = :s ORDER BY trade_date DESC LIMIT 20"),
+            {"s": symbol}
+        ).mappings().fetchall()
+
+        # Promoter pledge
+        pp = conn.execute(
+            sa.text("SELECT * FROM promoter_pledge WHERE symbol = :s"), {"s": symbol}
+        ).mappings().fetchone()
+
+        # Bulk deals
+        bd = conn.execute(
+            sa.text("SELECT * FROM bulk_deals WHERE symbol = :s ORDER BY deal_date DESC LIMIT 10"),
+            {"s": symbol}
+        ).mappings().fetchall()
+
+    result = {
+        "symbol": symbol,
+        "shareholding": [dict(s) for s in sh],
+        "insider_trades": [dict(i) for i in it],
+        "promoter_pledge": dict(pp) if pp else None,
+        "bulk_deals": [dict(b) for b in bd],
+    }
+    return JSONResponse(_clean_nan(result))
+
+
+@app.get("/api/fii-dii")
+async def api_fii_dii():
+    """Get FII/DII daily flow data."""
+    import sqlalchemy as sa
+    from indian_quant.web.prod_config import get_pg_engine
+    engine = get_pg_engine()
+
+    with engine.connect() as conn:
+        rows = conn.execute(
+            sa.text("SELECT * FROM fii_dii_daily ORDER BY trade_date DESC LIMIT 30")
+        ).mappings().fetchall()
+
+    return JSONResponse(_clean_nan({"data": [dict(r) for r in rows]}))
+
+
+@app.get("/api/sectors")
+async def api_sectors():
+    """Get sector performance data."""
+    import sqlalchemy as sa
+    from indian_quant.web.prod_config import get_pg_engine
+    engine = get_pg_engine()
+
+    with engine.connect() as conn:
+        # Sector map with stock counts
+        sectors = conn.execute(
+            sa.text("""
+                SELECT s.sector, COUNT(*) as stock_count,
+                       AVG(k.pe_trailing) as avg_pe,
+                       AVG(k.roe) as avg_roe,
+                       AVG(k.debt_to_equity) as avg_de
+                FROM sector_map s
+                LEFT JOIN key_ratios k ON s.symbol = k.symbol
+                WHERE s.sector IS NOT NULL
+                GROUP BY s.sector
+                ORDER BY stock_count DESC
+            """)
+        ).mappings().fetchall()
+
+        # Latest sector daily
+        daily = conn.execute(
+            sa.text("""
+                SELECT sector, trade_date, avg_return, avg_deliv_z, stock_count
+                FROM sector_daily
+                WHERE trade_date = (SELECT MAX(trade_date) FROM sector_daily)
+                ORDER BY avg_return DESC
+            """)
+        ).mappings().fetchall()
+
+    return JSONResponse(_clean_nan({
+        "sectors": [dict(s) for s in sectors],
+        "daily": [dict(d) for d in daily],
+    }))
+
+
+@app.get("/api/portfolio/risk")
+async def api_portfolio_risk():
+    """Get portfolio risk metrics."""
+    import sqlalchemy as sa
+    from indian_quant.web.prod_config import get_pg_engine
+    engine = get_pg_engine()
+
+    with engine.connect() as conn:
+        risk = conn.execute(
+            sa.text("SELECT * FROM portfolio_risk ORDER BY snapshot_date DESC LIMIT 1")
+        ).mappings().fetchone()
+
+    return JSONResponse(_clean_nan({"risk": dict(risk) if risk else None}))
+
+
+@app.get("/api/stock/{symbol}/risk")
+async def api_stock_risk(symbol: str):
+    """Get risk metrics for a stock."""
+    import sqlalchemy as sa
+    from indian_quant.web.prod_config import get_pg_engine
+    engine = get_pg_engine()
+    symbol = symbol.upper()
+
+    with engine.connect() as conn:
+        risk = conn.execute(
+            sa.text("SELECT * FROM stock_risk WHERE symbol = :s"), {"s": symbol}
+        ).mappings().fetchone()
+
+    return JSONResponse(_clean_nan({"symbol": symbol, "risk": dict(risk) if risk else None}))
 
 
 @app.get("/healthz")

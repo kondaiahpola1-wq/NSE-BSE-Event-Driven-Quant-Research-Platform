@@ -123,6 +123,99 @@ def conviction_score(row: pd.Series) -> float:
     return round(dz_norm + momentum + vol_trend + tech, 4)
 
 
+def conviction_score_v2(row: pd.Series, fundamentals: dict | None = None,
+                        institutional: dict | None = None,
+                        sector_data: dict | None = None) -> float:
+    """Professional conviction score with all 4 layers.
+
+    Components:
+      delivery+tech 55%  — existing conviction_score (deliv_z + momentum + vol + technicals)
+      fundamentals  25%  — valuation, profitability, financial health
+      institutional 20%  — FII/DII flows, promoter holding, pledge
+
+    Returns 0.0 if deliv_z is NaN.
+    """
+    # Layer 1: Delivery + Technical (existing)
+    base = conviction_score(row)
+
+    # Layer 2: Fundamentals (0-1)
+    fund = 0.0
+    if fundamentals:
+        pe = fundamentals.get("pe_trailing")
+        if pe is not None and 5 < pe < 25:
+            fund += 0.15
+        elif pe is not None and 25 < pe < 40:
+            fund += 0.05
+
+        roe = fundamentals.get("roe")
+        if roe is not None and roe > 20:
+            fund += 0.15
+        elif roe is not None and roe > 12:
+            fund += 0.08
+
+        de = fundamentals.get("debt_to_equity")
+        if de is not None and de < 0.5:
+            fund += 0.10
+        elif de is not None and de < 1.0:
+            fund += 0.05
+
+        margin = fundamentals.get("profit_margin")
+        if margin is not None and margin > 15:
+            fund += 0.10
+
+        growth = fundamentals.get("revenue_growth")
+        if growth is not None and growth > 0.15:
+            fund += 0.10
+
+        div_yield = fundamentals.get("dividend_yield")
+        if div_yield is not None and div_yield > 0.02:
+            fund += 0.05
+
+    fund = min(fund, 1.0)
+
+    # Layer 3: Institutional (0-1)
+    inst = 0.0
+    if institutional:
+        # FII buying (net positive)
+        fii_chg = institutional.get("fii_chg")
+        if fii_chg is not None and fii_chg > 0:
+            inst += 0.20
+        elif fii_chg is not None and fii_chg == 0:
+            inst += 0.05
+
+        # DII buying
+        dii_chg = institutional.get("dii_chg")
+        if dii_chg is not None and dii_chg > 0:
+            inst += 0.15
+
+        # Promoter not selling
+        promoter_chg = institutional.get("promoter_chg")
+        if promoter_chg is not None and promoter_chg >= 0:
+            inst += 0.20
+
+        # Low pledge
+        pledge = institutional.get("pledge_pct")
+        if pledge is not None and pledge < 5:
+            inst += 0.25
+        elif pledge is not None and pledge < 15:
+            inst += 0.15
+        elif pledge is not None and pledge < 25:
+            inst += 0.05
+
+        # High FII/DII holding (institutional interest)
+        fii_pct = institutional.get("fii_pct")
+        if fii_pct is not None and fii_pct > 20:
+            inst += 0.10
+        elif fii_pct is not None and fii_pct > 10:
+            inst += 0.05
+
+    inst = min(inst, 1.0)
+
+    # Weighted composite
+    score = (base * 0.55) + (fund * 0.25) + (inst * 0.20)
+    return round(min(score, 1.0), 4)
+
+
 def horizon_fit(score: float) -> str:
     """Assign holding horizon based on conviction score.
 

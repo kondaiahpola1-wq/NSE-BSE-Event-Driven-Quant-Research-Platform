@@ -78,5 +78,24 @@ def ensure_pg_schema():
                 )
             with contextlib.suppress(Exception):
                 conn.execute(sa.text("ALTER TABLE cached_signals ADD COLUMN market_cap_cr FLOAT"))
+            # Fundamental columns
+            for col, typedef in [
+                ("pe_trailing", "FLOAT"), ("price_to_book", "FLOAT"),
+                ("roe", "FLOAT"), ("debt_to_equity", "FLOAT"),
+                ("profit_margin", "FLOAT"), ("revenue_growth", "FLOAT"),
+                ("dividend_yield", "FLOAT"), ("ev_to_ebitda", "FLOAT"),
+                ("current_ratio", "FLOAT"), ("sector", "VARCHAR(64)"),
+                ("industry", "VARCHAR(128)"), ("company_name", "TEXT"),
+                ("fundamental_score", "FLOAT"),
+                # Institutional columns
+                ("fii_pct", "FLOAT"), ("dii_pct", "FLOAT"),
+                ("promoter_pct", "FLOAT"), ("fii_chg", "FLOAT"),
+                ("dii_chg", "FLOAT"), ("promoter_chg", "FLOAT"),
+                ("pledge_pct", "FLOAT"), ("institutional_score", "FLOAT"),
+                # Professional score
+                ("professional_score", "FLOAT"),
+            ]:
+                with contextlib.suppress(Exception):
+                    conn.execute(sa.text(f"ALTER TABLE cached_signals ADD COLUMN {col} {typedef}"))
     except Exception:
         pass

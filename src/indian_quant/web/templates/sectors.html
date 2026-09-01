@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Sectors{% endblock %}
+{% block nav_sectors %}active{% endblock %}
+{% block content %}
+<h1>Sector Analysis</h1>
+<div class="sub" style="color:var(--faint);margin-bottom:16px">Sector rotation, valuation, and institutional flow by sector</div>
+
+<div class="section-title">Sector Overview</div>
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))" id="sectorCards">
+  <div class="card"><div class="label">Loading...</div><div class="value">--</div></div>
+</div>
+
+<div class="section-title">Sector Performance (Latest Day)</div>
+<table id="sectorTable">
+  <thead>
+    <tr>
+      <th>Sector</th>
+      <th>Stocks</th>
+      <th>Avg Return</th>
+      <th>Avg Delivery Z</th>
+      <th>Avg PE</th>
+      <th>Avg ROE</th>
+      <th>Avg D/E</th>
+    </tr>
+  </thead>
+  <tbody id="sectorBody">
+    <tr><td colspan="7" class="empty">Loading...</td></tr>
+  </tbody>
+</table>
+
+<script>
+async function loadSectors() {
+  try {
+    const resp = await fetch('/api/sectors');
+    const data = await resp.json();
+
+    // Overview cards
+    const cards = document.getElementById('sectorCards');
+    const sectors = data.sectors || [];
+    if (sectors.length > 0) {
+      cards.innerHTML = sectors.slice(0, 6).map(s => `
+        <div class="card">
+          <div class="label">${s.sector || 'Unknown'}</div>
+          <div class="value">${s.stock_count || 0}</div>
+          <div class="sub">stocks · PE ${(s.avg_pe || 0).toFixed(1)} · ROE ${(s.avg_roe || 0).toFixed(1)}%</div>
+        </div>
+      `).join('');
+    }
+
+    // Performance table
+    const daily = data.daily || [];
+    const tbody = document.getElementById('sectorBody');
+    if (daily.length > 0) {
+      tbody.innerHTML = daily.map(d => {
+        const retClass = (d.avg_return || 0) > 0 ? 'good' : (d.avg_return || 0) < 0 ? 'bad' : '';
+        return `<tr>
+          <td><strong>${d.sector || 'Unknown'}</strong></td>
+          <td>${d.stock_count || 0}</td>
+          <td class="${retClass}">${((d.avg_return || 0) * 100).toFixed(2)}%</td>
+          <td>${(d.avg_deliv_z || 0).toFixed(2)}</td>
+          <td>--</td>
+          <td>--</td>
+          <td>--</td>
+        </tr>`;
+      }).join('');
+    } else {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">No sector data available. Run: python scripts/ingest_sectors.py</td></tr>';
+    }
+  } catch(e) {
+    console.error('Failed to load sectors:', e);
+  }
+}
+loadSectors();
+</script>
+{% endblock %}

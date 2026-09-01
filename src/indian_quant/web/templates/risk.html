@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Portfolio Risk{% endblock %}
+{% block nav_risk %}active{% endblock %}
+{% block content %}
+<h1>Portfolio Risk Dashboard</h1>
+<div class="sub" style="color:var(--faint);margin-bottom:16px">VaR, drawdown, concentration, and risk limits</div>
+
+<div class="section-title">Risk Metrics</div>
+<div class="grid grid-4" id="riskCards">
+  <div class="card"><div class="label">Loading...</div><div class="value">--</div></div>
+</div>
+
+<div class="section-title">Risk Limits</div>
+<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))" id="limitsGrid">
+  <div class="card">
+    <div class="label">VaR Budget</div>
+    <div id="varBar" style="margin-top:8px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--dim)">
+        <span>Current: --</span><span>Limit: 4%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Max Drawdown</div>
+    <div id="ddBar" style="margin-top:8px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--dim)">
+        <span>Current: --</span><span>Limit: 10%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:0%"></div></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Sharpe Ratio</div>
+    <div class="value" id="sharpeVal">--</div>
+    <div class="sub">30-day rolling</div>
+  </div>
+  <div class="card">
+    <div class="label">Portfolio Beta</div>
+    <div class="value" id="betaVal">--</div>
+    <div class="sub">vs Nifty 50</div>
+  </div>
+</div>
+
+<div class="section-title">Recent Risk History</div>
+<table>
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Total Value</th>
+      <th>VaR 95%</th>
+      <th>CVaR 95%</th>
+      <th>Max DD</th>
+      <th>Sharpe</th>
+      <th>Positions</th>
+    </tr>
+  </thead>
+  <tbody id="riskHistory">
+    <tr><td colspan="7" class="empty">Loading...</td></tr>
+  </tbody>
+</table>
+
+<script>
+async function loadRisk() {
+  try {
+    const resp = await fetch('/api/portfolio/risk');
+    const data = await resp.json();
+    const risk = data.risk;
+
+    if (!risk) {
+      document.getElementById('riskCards').innerHTML = `
+        <div class="card"><div class="label">No Risk Data</div>
+        <div class="sub">Run: python scripts/compute_risk.py --portfolio</div></div>`;
+      return;
+    }
+
+    // Risk cards
+    const cards = document.getElementById('riskCards');
+    const varPct = ((risk.var_95 || 0) * 100).toFixed(2);
+    const cvarPct = ((risk.cvar_95 || 0) * 100).toFixed(2);
+    const ddPct = ((risk.max_drawdown || 0) * 100).toFixed(2);
+    const val = (risk.total_value || 0);
+
+    cards.innerHTML = `
+      <div class="card">
+        <div class="label">Portfolio Value</div>
+        <div class="value">₹${(val/100000).toFixed(1)}L</div>
+        <div class="sub">${risk.n_positions || 0} positions · ${risk.n_sectors || 0} sectors</div>
+      </div>
+      <div class="card">
+        <div class="label">VaR (95%)</div>
+        <div class="value ${parseFloat(varPct) < -2 ? 'bad' : 'good'}">${varPct}%</div>
+        <div class="sub">Daily value-at-risk</div>
+      </div>
+      <div class="card">
+        <div class="label">CVaR (95%)</div>
+        <div class="value ${parseFloat(cvarPct) < -3 ? 'bad' : 'warn'}">${cvarPct}%</div>
+        <div class="sub">Expected shortfall</div>
+      </div>
+      <div class="card">
+        <div class="label">Max Drawdown</div>
+        <div class="value ${parseFloat(ddPct) < -8 ? 'bad' : 'warn'}">${ddPct}%</div>
+        <div class="sub">From peak</div>
+      </div>
+    `;
+
+    // VaR bar
+    const varUsed = Math.abs(risk.var_95 || 0) / 0.04 * 100;
+    document.querySelector('#varBar .progress-fill').style.width = Math.min(varUsed, 100) + '%';
+    document.querySelector('#varBar span:first-child').textContent = `Current: ${varPct}%`;
+
+    // DD bar
+    const ddUsed = Math.abs(risk.max_drawdown || 0) / 0.10 * 100;
+    document.querySelector('#ddBar .progress-fill').style.width = Math.min(ddUsed, 100) + '%';
+    document.querySelector('#ddBar span:first-child').textContent = `Current: ${ddPct}%`;
+
+    // Sharpe and Beta
+    document.getElementById('sharpeVal').textContent = (risk.sharpe_ratio || 0).toFixed(2);
+    document.getElementById('betaVal').textContent = risk.portfolio_beta ? risk.portfolio_beta.toFixed(2) : 'N/A';
+
+  } catch(e) {
+    console.error('Failed to load risk:', e);
+  }
+}
+loadRisk();
+</script>
+{% endblock %}
