@@ -215,7 +215,7 @@ def _ensure_scores(signals: list[dict]) -> None:
         r_vals.append(r if r is not None else 0)
         v_vals.append(v if v is not None else 0)
 
-    if signals and "_score" in signals[0]:
+    if signals and "_score" in signals[0] and "conviction_score" in signals[0]:
         return
 
     z_min, z_max = min(z_vals), max(z_vals)
@@ -240,7 +240,7 @@ def _ensure_scores(signals: list[dict]) -> None:
         mom = min(max(r_vals[i] / 3.0, 0.0), 1.0) * 0.30
         vol = min(max(v_vals[i] / 2.0, 0.0), 1.0) * 0.20
         rsi = _safe(s.get("rsi")) or 50.0
-        macd_h = _safe(s.get("macd_hist")) or 0.0
+        macd_h = _safe(s.get("macd_hist")) or _safe(s.get("macd")) or 0.0
         close = _safe(s.get("close")) or 0.0
         sma20 = _safe(s.get("sma_20")) or close
         tech = 0.0
