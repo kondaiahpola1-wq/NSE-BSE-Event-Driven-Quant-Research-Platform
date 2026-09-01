@@ -23,13 +23,17 @@ jobs:
         env:
           NSE_QUANT_PG_DSN: ${{ secrets.NEON_PG_DSN }}
           NSE_QUANT_REDIS_URL: ${{ secrets.UPSTASH_REDIS_URL }}
-        run: uv run python scripts/bulk_ingest.py --source nse --type delivery
+        run: |
+          YESTERDAY=$(date -d 'yesterday' +%Y-%m-%d)
+          uv run python scripts/bulk_ingest.py --from $YESTERDAY --to $YESTERDAY --exchange NSE --delivery-only
 
       - name: Ingest BSE delivery data
         env:
           NSE_QUANT_PG_DSN: ${{ secrets.NEON_PG_DSN }}
           NSE_QUANT_REDIS_URL: ${{ secrets.UPSTASH_REDIS_URL }}
-        run: uv run python scripts/bulk_ingest.py --source bse --type delivery
+        run: |
+          YESTERDAY=$(date -d 'yesterday' +%Y-%m-%d)
+          uv run python scripts/bulk_ingest.py --from $YESTERDAY --to $YESTERDAY --exchange BSE --delivery-only
 
       - name: Rebuild signal cache
         env:

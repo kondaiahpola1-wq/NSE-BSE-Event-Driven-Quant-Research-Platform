@@ -206,19 +206,22 @@ def evening_cycle() -> None:
     if not _weekday():
         return
     log.info("═══ EVENING CYCLE (18:00 IST) ═══")
-    _run("bulk_ingest", [str(VENV_PYTHON), "scripts/bulk_ingest.py"], timeout=600)
+    today = _now_ist().strftime("%Y-%m-%d")
+    _run("bulk_ingest", [str(VENV_PYTHON), "scripts/bulk_ingest.py",
+         "--from", today, "--to", today, "--exchange", "both",
+         "--delivery-only"], timeout=900)
     _run("daily_signals", [str(VENV_PYTHON), "scripts/daily_signals.py"],
-         timeout=120)
+         timeout=180)
     _run("paper_settle", [str(VENV_PYTHON), "scripts/paper_track.py", "settle"],
          timeout=60)
     _run("paper_snapshot", [str(VENV_PYTHON), "scripts/paper_track.py", "snapshot"],
-         timeout=60)
+         timeout=300)
     _run("cache_rebuild", [str(VENV_PYTHON), "scripts/cache_signals.py"],
-         timeout=120)
+         timeout=300)
     _run("sugg_settle", [str(VENV_PYTHON), "scripts/suggestion_manager.py", "settle"],
          timeout=60)
     _run("sugg_record", [str(VENV_PYTHON), "scripts/suggestion_manager.py", "record"],
-         timeout=60)
+         timeout=120)
     _run("watchlist_update",
          [str(VENV_PYTHON), "scripts/watchlist_signal_update.py"], timeout=60)
     _run("status_report", [str(VENV_PYTHON), "scripts/status_report.py"], timeout=30)
