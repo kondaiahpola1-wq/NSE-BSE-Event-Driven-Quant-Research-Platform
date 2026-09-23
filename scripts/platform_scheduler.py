@@ -37,7 +37,7 @@ log = logging.getLogger("platform_scheduler")
 
 ROOT = Path(__file__).resolve().parents[1]
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
-LOG_DIR = Path("/tmp/nse-platform-cron")
+LOG_DIR = ROOT / "logs"
 TZ_IST = timezone(timedelta(hours=5, minutes=30))
 
 _running = True
@@ -113,7 +113,7 @@ def start_mcp() -> None:
     if _port_open(3000):
         log.info("MCP started on port 3000")
     else:
-        log.warning("MCP may not have started — check /tmp/nse-platform-cron/mcp.log")
+        log.warning(f"MCP may not have started — check {LOG_DIR}/mcp.log")
 
 
 def start_web() -> None:
@@ -124,7 +124,7 @@ def start_web() -> None:
     subprocess.Popen(
         [str(VENV_PYTHON), "-m", "uvicorn",
          "indian_quant.web.app:app",
-         "--host", "127.0.0.1", "--port", "8080",
+         "--host", "0.0.0.0", "--port", "8080",
          "--log-level", "warning"],
         cwd=str(ROOT),
         stdout=open(LOG_DIR / "web.log", "a"),
@@ -135,7 +135,7 @@ def start_web() -> None:
     if _port_open(8080):
         log.info("Web started on port 8080")
     else:
-        log.warning("Web may not have started — check /tmp/nse-platform-cron/web.log")
+        log.warning(f"Web may not have started — check {LOG_DIR}/web.log")
 
 
 def stop_web() -> None:
@@ -192,11 +192,18 @@ def market_hours_refresh() -> None:
          timeout=120)
     _run("cache_rebuild", [str(VENV_PYTHON), "scripts/cache_signals.py"],
          timeout=120)
+    # Live mark-to-market + stop/target settlement for open paper positions
+    _run("live_paper_update", [str(VENV_PYTHON), "scripts/live_paper_update.py"],
+         timeout=120)
 
 
 def market_close() -> None:
-    """16:00 IST — Stop heavy background jobs."""
+    """16:00 IST — Stop heavy background jobs, settle hypothesis trades."""
     log.info("═══ MARKET CLOSE (16:00 IST) ═══")
+    _run("live_paper_update", [str(VENV_PYTHON), "scripts/live_paper_update.py"],
+         timeout=120)
+    _run("hypothesis_settle", [str(VENV_PYTHON), "scripts/hypothesis_settle.py"],
+         timeout=300)
     stop_heavy()
     log.info("Heavy jobs stopped. Web stays alive.")
 
@@ -214,17 +221,30 @@ def evening_cycle() -> None:
          timeout=180)
     _run("paper_settle", [str(VENV_PYTHON), "scripts/paper_track.py", "settle"],
          timeout=60)
-    _run("paper_snapshot", [str(VENV_PYTHON), "scripts/paper_track.py", "snapshot"],
+    _run("paper_snapshot", [str(VENV_PYTHON), "scripts/paper_track.py", "snapshot",
+         "--capital", "250000"],
          timeout=300)
     _run("cache_rebuild", [str(VENV_PYTHON), "scripts/cache_signals.py"],
          timeout=300)
+    # Backtest refresh: keep /backtest page in sync with current data
+    # (per-signal metrics feed the hypothesis-wise backtest table)
+    _run("cluster_backtest", [str(VENV_PYTHON), "scripts/cluster_backtest.py",
+         "--signals", "dz_hi_up,dz_hi_dn,dz_lo_up,spike_70,streak3"],
+         timeout=900)
+    # Surveillance data: ASM/GSM from NSE (uses SeleniumBase anti-detection)
+    _run("surveillance_scrape", [str(VENV_PYTHON), "scripts/scrape_nse_surveillance.py",
+         "--save-json", "--ingest-pg"], timeout=180)
+    _run("surveillance_analysis", [str(VENV_PYTHON), "scripts/analyze_surveillance.py",
+         "--top", "15"], timeout=600)
+    _run("surveillance_paper_trade", [str(VENV_PYTHON), "scripts/surveillance_paper_trade.py",
+         "--top", "7"], timeout=120)
     # Professional quant layer: fundamentals, institutional, sectors, risk
     _run("ingest_fundamentals", [str(VENV_PYTHON), "scripts/ingest_fundamentals.py",
          "--recent"], timeout=600)
     _run("ingest_institutional", [str(VENV_PYTHON), "scripts/ingest_institutional.py",
          "--daily"], timeout=300)
     _run("ingest_sectors", [str(VENV_PYTHON), "scripts/ingest_sectors.py"],
-         timeout=300)
+         timeout=600)
     _run("compute_risk", [str(VENV_PYTHON), "scripts/compute_risk.py"],
          timeout=300)
     _run("sugg_settle", [str(VENV_PYTHON), "scripts/suggestion_manager.py", "settle"],
@@ -233,15 +253,40 @@ def evening_cycle() -> None:
          timeout=120)
     _run("watchlist_update",
          [str(VENV_PYTHON), "scripts/watchlist_signal_update.py"], timeout=60)
+    # Hypothesis framework: generate signals + settle trades
+    # Circuit breaker data: NSE price bands + Upstox snapshot
+    _run("circuit_ingest", [str(VENV_PYTHON), "scripts/ingest_circuit_limits.py",
+         "--date", today], timeout=300)
+    _run("circuit_snapshot", [str(VENV_PYTHON), "scripts/snapshot_circuit_limits.py"],
+         timeout=600)
+    _run("circuit_live_detect", [str(VENV_PYTHON), "scripts/detect_live_circuits.py",
+         "--top", "7"], timeout=300)
+    _run("circuit_patterns", [str(VENV_PYTHON), "scripts/analyze_circuit_patterns.py",
+         "--days", "180"], timeout=600)
+    # Hypothesis framework: generate signals + settle trades
+    # Use yesterday's date: at 18:33 on day T, bulk_ingest has written day T's data,
+    # so T-1 cluster_entry (delivery) and continuation (circuit) are confirmed.
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    _run("hypothesis_signals", [str(VENV_PYTHON), "scripts/hypothesis_signals.py",
+         "--date", yesterday], timeout=300)
+    _run("hypothesis_settle", [str(VENV_PYTHON), "scripts/hypothesis_settle.py"],
+         timeout=300)
+    # Safety net: cap open paper positions to top 7 per hypothesis
+    _run("cap_positions", [str(VENV_PYTHON), "scripts/cap_hypothesis_positions.py",
+         "--top", "7"], timeout=300)
     _run("status_report", [str(VENV_PYTHON), "scripts/status_report.py"], timeout=30)
     log.info("═══ EVENING CYCLE COMPLETE ═══")
 
 
 def night_stop() -> None:
-    """21:00 IST — Stop everything."""
+    """21:00 IST — Stop heavy jobs, keep web alive for research."""
     log.info("═══ NIGHT STOP (21:00 IST) ═══")
-    stop_all()
-    log.info("All services stopped for the night.")
+    stop_heavy()
+    if _pgrep("nse-bse-mcp"):
+        log.info("Stopping MCP...")
+        subprocess.run(["pkill", "-f", "nse-bse-mcp"], capture_output=True, timeout=5)
+        time.sleep(2)
+    log.info("Heavy jobs and MCP stopped. Web stays alive for research.")
 
 
 def health_check() -> None:
@@ -251,16 +296,16 @@ def health_check() -> None:
     is_market = _weekday() and 8 <= h < 16
     is_evening = _weekday() and 18 <= h < 21
 
-    if not is_market and not is_evening:
-        return  # don't restart outside active hours
-
-    if not _port_open(3000):
-        log.warning("Health check: MCP dead, restarting...")
-        start_mcp()
-
+    # Web always running — restart anytime it's dead
     if not _port_open(8080):
         log.warning("Health check: Web dead, restarting...")
         start_web()
+
+    # MCP only during market/evening hours
+    if is_market or is_evening:
+        if not _port_open(3000):
+            log.warning("Health check: MCP dead, restarting...")
+            start_mcp()
 
 
 # ── Scheduler loop ─────────────────────────────────────────────────────────

@@ -9,18 +9,18 @@
   <div class="card"><div class="label">Total Trades</div><div class="value">{{ pf.total_trades }}</div></div>
   <div class="card"><div class="label">Open Positions</div><div class="value neutral">{{ pf.open_positions }}</div></div>
   <div class="card"><div class="label">Hit Rate</div><div class="value {% if pf.hit_rate and pf.hit_rate > 0.5 %}good{% elif pf.hit_rate and pf.hit_rate < 0.4 %}bad{% else %}neutral{% endif %}">{{ (pf.hit_rate * 100)|round(1) if pf.hit_rate else '—' }}%</div></div>
-  <div class="card"><div class="label">Avg Net BPS</div><div class="value {% if pf.avg_net_bps and pf.avg_net_bps > 0 %}good{% elif pf.avg_net_bps and pf.avg_net_bps < 0 %}bad{% else %}neutral{% endif %}">{{ pf.avg_net_bps if pf.avg_net_bps is not none else '—' }}</div></div>
+  <div class="card"><div class="label">Avg Net BPS</div><div class="value {% if pf.avg_net_bps and pf.avg_net_bps > 0 %}good{% elif pf.avg_net_bps and pf.avg_net_bps < 0 %}bad{% else %}neutral{% endif %}">{{ pf.avg_net_bps|round(1) if pf.avg_net_bps is not none else '—' }}</div></div>
 </div>
 <div class="grid grid-4" style="margin-top:12px">
-  <div class="card"><div class="label">Avg Days Held</div><div class="value">{{ pf.avg_days_held if pf.avg_days_held else '—' }}</div></div>
-  <div class="card"><div class="label">Best Trade</div><div class="value good">{{ pf.best_bps if pf.best_bps is not none else '—' }} bps</div></div>
-  <div class="card"><div class="label">Worst Trade</div><div class="value bad">{{ pf.worst_bps if pf.worst_bps is not none else '—' }} bps</div></div>
+  <div class="card"><div class="label">Avg Days Held</div><div class="value">{{ pf.avg_days_held|round(1) if pf.avg_days_held is defined and pf.avg_days_held else '—' }}</div></div>
+  <div class="card"><div class="label">Best Trade</div><div class="value good">{{ pf.best_bps|round(0) if pf.best_bps is defined and pf.best_bps is not none else '—' }} bps</div></div>
+  <div class="card"><div class="label">Worst Trade</div><div class="value bad">{{ pf.worst_bps|round(0) if pf.worst_bps is defined and pf.worst_bps is not none else '—' }} bps</div></div>
   <div class="card"><div class="label">Stops / Horizon</div><div class="value">{{ pf.stops }} / {{ pf.horizon_exits }}</div></div>
 </div>
 <div class="grid grid-4" style="margin-top:12px">
   <div class="card"><div class="label">Position Value (Open)</div><div class="value">₹{{ '{:,.0f}'.format(pf.total_position_value) }}</div></div>
   <div class="card"><div class="label">Total Risk (Open)</div><div class="value warn">₹{{ '{:,.0f}'.format(pf.total_risk) }}</div></div>
-  <div class="card"><div class="label">Capital at Risk</div><div class="value">{{ ((pf.total_risk / 25000) * 100)|round(1) if pf.total_risk else '—' }}%</div></div>
+  <div class="card"><div class="label">Capital at Risk</div><div class="value">{{ ((pf.total_risk / cap_total.allocated) * 100)|round(1) if pf.total_risk and cap_total else '—' }}%</div></div>
   <div class="card"><div class="label">Avg Return %</div><div class="value {% if pf.avg_net_bps and pf.avg_net_bps > 0 %}good{% elif pf.avg_net_bps and pf.avg_net_bps < 0 %}bad{% else %}neutral{% endif %}">{{ ((pf.avg_net_bps or 0) / 100)|round(2) if pf.avg_net_bps else '—' }}%</div></div>
 </div>
 
@@ -31,9 +31,62 @@
     <div class="label">{{ label }} {% if label == '1d' %}Scalp{% elif label == '5d' %}Swing{% else %}Position{% endif %}</div>
     <div class="value" style="font-size:22px">{{ hz.settled }} settled / {{ hz.open }} open</div>
     <div class="sub">
-      avg <span class="{% if hz.avg_net_bps and hz.avg_net_bps > 0 %}good{% elif hz.avg_net_bps and hz.avg_net_bps < 0 %}bad{% endif %}">{{ hz.avg_net_bps if hz.avg_net_bps is not none else '—' }}bps</span>
+      avg <span class="{% if hz.avg_net_bps and hz.avg_net_bps > 0 %}good{% elif hz.avg_net_bps and hz.avg_net_bps < 0 %}bad{% endif %}">{{ hz.avg_net_bps|round(1) if hz.avg_net_bps is not none else '—' }}bps</span>
       · hit {{ (hz.hit_rate * 100)|round(1) if hz.hit_rate else '—' }}%
       · avg {{ hz.avg_days_held|round(0) if hz.avg_days_held else '—' }}d
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="section-title">By Hypothesis</div>
+<div class="grid grid-4">
+  {% for name, h in by_hyp.items() %}
+  <div class="card">
+    <div class="label" style="font-size:11px">{% if name == 'delivery_momentum' %}Delivery Momentum{% elif name == 'circuit_breakout' %}Circuit Breakout{% elif name == 'surveillance_recovery' %}Surveillance Recovery{% elif name == 'announcement_alpha' %}Announcement Alpha{% else %}{{ name }}{% endif %}</div>
+    <div class="value" style="font-size:22px">{{ h.trades }} trades</div>
+    <div class="sub">
+      <span class="{% if h.win_rate > 50 %}good{% elif h.win_rate < 40 %}bad{% endif %}">{{ h.win_rate|round(1) if h.win_rate is defined and h.win_rate is not none else '—' }}% win</span>
+      {% if h.avg_net is not none %} · <span class="{% if h.avg_net > 0 %}good{% elif h.avg_net < 0 %}bad{% endif %}">{{ h.avg_net|int }}bps avg</span>{% endif %}
+    </div>
+    <div class="sub">
+      {% if h.stops %}<span class="bad">{{ h.stops }} stops</span>{% endif %}
+      {% if h.horizon_exits %} · <span class="neutral">{{ h.horizon_exits }} horizon</span>{% endif %}
+      {% if h.avg_days %} · {{ h.avg_days|round(1) }}d avg{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="section-title">Capital Allocation (₹10L per hypothesis)</div>
+<div class="grid grid-4" style="margin-top:12px">
+  {% set tc = cap_total.allocated if cap_total else 0 %}
+  {% set te = cap_total.equity if cap_total and cap_total.equity is defined else tc %}
+  <div class="card">
+    <div class="label">Total Capital — ₹40,00,000 {% if cap_total.get('_sync') == 'OK' %}<span class="good" style="font-size:11px">✓ synced</span>{% else %}<span class="bad" style="font-size:11px">⚠ {{ cap_total.get('_sync') }}</span>{% endif %}</div>
+    <div class="value neutral">₹{{ '{:,.0f}'.format(cap_total.equity) if cap_total and cap_total.equity is defined else '—' }}</div>
+    <div class="sub">
+      deployed ₹{{ '{:,.0f}'.format(cap_total.deployed) }} ({{ (cap_total.deployed/tc*100)|round(1) if tc else 0 }}%)
+      · avail ₹{{ '{:,.0f}'.format(cap_total.available) }} ({{ (cap_total.available/tc*100)|round(1) if tc else 0 }}%)
+      · <span class="{% if cap_total and cap_total.realized_pnl > 0 %}good{% elif cap_total and cap_total.realized_pnl < 0 %}bad{% else %}neutral{% endif %}">{{ '%+.0f'|format(cap_total.realized_pnl) }} ({{ ((cap_total.realized_pnl/tc)*100)|round(1) if tc else 0 }}%)</span>
+    </div>
+    <div class="sub">
+      {{ cap_total.open_count if cap_total else 0 }}/28 open
+    </div>
+  </div>
+</div>
+<div class="grid grid-4" style="margin-top:12px">
+  {% for name, h in by_hyp.items() %}
+  <div class="card">
+    <div class="label" style="font-size:11px">{% if name == 'delivery_momentum' %}Delivery Momentum{% elif name == 'circuit_breakout' %}Circuit Breakout{% elif name == 'surveillance_recovery' %}Surveillance Recovery{% elif name == 'announcement_alpha' %}Announcement Alpha{% else %}{{ name }}{% endif %} — ₹{{ '{:,.0f}'.format(h.allocated) if h.allocated is defined else '—' }}</div>
+    <div class="value" style="font-size:22px">₹{{ '{:,.0f}'.format(h.equity) if h.equity is defined else '—' }}</div>
+    <div class="sub">
+      deployed ₹{{ '{:,.0f}'.format(h.deployed) if h.deployed is defined else '—' }}
+      · avail ₹{{ '{:,.0f}'.format(h.available) if h.available is defined else '—' }}
+      · <span class="{% if h.realized_pnl is defined and h.realized_pnl > 0 %}good{% elif h.realized_pnl is defined and h.realized_pnl < 0 %}bad{% endif %}">{{ '%+.0f'|format(h.realized_pnl) }} ({{ ((h.realized_pnl/h.allocated)*100)|round(1) if h.allocated and h.realized_pnl is defined else 0 }}%)</span>
+    </div>
+    <div class="sub">
+      {{ h.open_count if h.open_count is defined else 0 }}/7 open
     </div>
   </div>
   {% endfor %}
@@ -44,51 +97,73 @@
   <a class="filter-btn {% if not filter_horizon %}active{% endif %}" href="/positions">All</a>
   <a class="filter-btn {% if filter_horizon == '1d' %}active{% endif %}" href="/positions?horizon=1d">1d Scalp</a>
   <a class="filter-btn {% if filter_horizon == '5d' %}active{% endif %}" href="/positions?horizon=5d">5d Swing</a>
-  <a class="filter-btn {% if filter_horizon == '10d' %}active{% endif %}" href="/positions?horizon=10d">10d Position</a>
+  <a class="filter-btn {% if filter_horizon == '15d' %}active{% endif %}" href="/positions?horizon=15d">15d Position</a>
   <div class="filter-sep"></div>
-  <a class="filter-btn {% if filter_status == 'OPEN' %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}&status=OPEN">Open</a>
-  <a class="filter-btn {% if filter_status == 'SETTLED' %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}&status=SETTLED">Settled</a>
+  <a class="filter-btn {% if not filter_type and not filter_hypo %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}">All</a>
+  <a class="filter-btn {% if filter_hypo == 'delivery_momentum' %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}&hypo=delivery_momentum">Delivery</a>
+  <a class="filter-btn {% if filter_hypo == 'circuit_breakout' %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}&hypo=circuit_breakout">Circuit</a>
+  <a class="filter-btn {% if filter_hypo == 'surveillance_recovery' %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}&hypo=surveillance_recovery">Surveillance</a>
+  <a class="filter-btn {% if filter_hypo == 'announcement_alpha' %}active{% endif %}" href="/positions?horizon={{ filter_horizon or '' }}&hypo=announcement_alpha">Announcement</a>
 </div>
 
-<div class="section-title">Trade Log ({{ trades|length }} trades)</div>
+<div class="section-title">Positions ({{ trades|length }}) <span style="font-size:12px;color:var(--dim);font-weight:normal">— open + exited today</span></div>
 {% if trades %}
 <table>
 <tr>
   <th>Symbol</th>
+  <th>Strategy</th>
   <th>Horizon</th>
   <th>Status</th>
+  <th>Entry ₹</th>
   <th>Entry Date</th>
-  <th>Entry Price</th>
-  <th>Exit Date</th>
-  <th>Exit Price</th>
+  <th>Live ₹</th>
+  <th>Live P&L</th>
   <th>Qty</th>
   <th>Position ₹</th>
   <th>Risk ₹</th>
   <th>Days</th>
-  <th>Return %</th>
+  <th>Exit ₹</th>
+  <th>Exit Date</th>
   <th>Net BPS</th>
   <th>Conviction</th>
   <th>Kelly %</th>
   <th>Exit Reason</th>
+  <th>Action</th>
 </tr>
 {% for t in trades %}
-<tr>
+{% set is_circuit = t.hypothesis_id == 2 %}
+{% set is_surveillance = t.hypothesis_id == 3 or (not t.hypothesis_id and t.note and 'surveillance' in t.note) %}
+{% set is_announcement = t.hypothesis_id == 4 %}
+{% set is_settled = t.status == 'SETTLED' %}
+{% set lp = live_prices.get(t.symbol, {}) %}
+{% set live_price = lp.last_price if lp else none %}
+{% set entry_p = t.close_at_signal or 0 %}
+{% set live_pnl = ((live_price - entry_p) / entry_p * 100) if live_price and entry_p else none %}
+<tr style="{% if is_settled %}opacity:0.65{% endif %}">
   <td class="mono" style="color:var(--green)"><a href="/stock/{{ t.symbol }}" target="_blank" style="color:var(--green);text-decoration:underline">{{ t.symbol }}</a></td>
+  <td>{% if is_circuit %}<span class="badge badge-orange">CIRC</span>{% elif is_announcement %}<span class="badge badge-red">ANN</span>{% elif is_surveillance %}<span class="badge badge-purple">SURV</span>{% else %}<span class="badge badge-green">DEL</span>{% endif %}</td>
   <td><span class="badge {% if t.horizon_label == '1d' %}badge-orange{% elif t.horizon_label == '5d' %}badge-green{% else %}badge-green{% endif %}">{{ t.horizon_label or '?' }}</span></td>
-  <td><span class="badge {% if t.status == 'OPEN' %}badge-orange{% else %}badge-green{% endif %}">{{ t.status }}</span></td>
-  <td class="mono" style="font-size:12px">{{ (t.entry_date or t.created_at or '')[:10] }}</td>
-  <td class="mono">₹{{ '%.2f'|format(t.close_at_signal) }}</td>
-  <td class="mono" style="font-size:12px">{{ (t.exit_date or '—')[:10] }}</td>
-  <td class="mono">{% if t.exit_close %}₹{{ '%.2f'|format(t.exit_close) }}{% else %}—{% endif %}</td>
+  <td>{% if is_settled %}<span class="badge" style="color:var(--dim);border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.05)">EXITED</span>{% else %}<span class="badge badge-orange">OPEN</span>{% endif %}</td>
+  <td class="mono">₹{{ '%.2f'|format(entry_p) }}</td>
+  <td class="mono" style="font-size:12px">{{ t.entry_date[:10] if t.entry_date else '—' }}</td>
+  {% if not is_settled and live_price %}
+  <td class="mono" style="font-weight:bold">₹{{ '%.2f'|format(live_price) }}</td>
+  <td class="{% if live_pnl and live_pnl > 0 %}good{% elif live_pnl and live_pnl < 0 %}bad{% endif %} mono" style="font-weight:bold">{% if live_pnl is not none %}{{ '%+.2f'|format(live_pnl) }}%{% else %}—{% endif %}</td>
+  {% else %}
+  <td class="mono" style="color:var(--faint)">—</td>
+  <td class="mono" style="color:var(--faint)">—</td>
+  {% endif %}
   <td>{{ t.qty }}</td>
   <td class="mono">₹{{ '{:,.0f}'.format(t.position_value) }}</td>
   <td class="mono warn">₹{{ '{:,.0f}'.format(t.risk_amount) }}</td>
   <td>{{ t.days_held or '—' }}</td>
-  <td class="{% if t.return_pct and t.return_pct > 0 %}good{% elif t.return_pct and t.return_pct < 0 %}bad{% endif %} mono">{% if t.return_pct is not none %}{{ '%+.1f'|format(t.return_pct) }}%{% else %}—{% endif %}</td>
+  <td class="mono">{% if t.exit_close %}₹{{ '%.2f'|format(t.exit_close) }}{% else %}—{% endif %}</td>
+  <td class="mono" style="font-size:12px">{% if t.exit_date %}{{ t.exit_date[:10] }}{% else %}—{% endif %}</td>
   <td class="{% if t.realized_net_bps and t.realized_net_bps > 0 %}good{% elif t.realized_net_bps and t.realized_net_bps < 0 %}bad{% endif %} mono">{% if t.realized_net_bps is not none %}{{ '%+.0f'|format(t.realized_net_bps) }}bps{% else %}—{% endif %}</td>
   <td class="mono" style="font-size:12px">{% if t.conviction_score %}{{ '%.3f'|format(t.conviction_score) }}{% else %}—{% endif %}</td>
   <td class="mono" style="font-size:12px">{% if t.kelly_fraction %}{{ '%.2f'|format(t.kelly_fraction * 100) }}%{% else %}—{% endif %}</td>
   <td>{% if t.exit_reason %}<span class="badge {% if t.exit_reason == 'STOP' %}badge-red{% else %}badge-green{% endif %}">{{ t.exit_reason }}</span>{% endif %}</td>
+  <td>{% if not is_settled %}<form method="post" action="/positions/exit/{{ t.id }}" onsubmit="return confirm('Exit {{ t.symbol }} now at live price? This realizes the P&L.')" style="display:inline"><button type="submit" class="filter-btn" style="color:#ff7b7b;border-color:rgba(255,80,80,.4);padding:2px 10px;font-size:12px">Exit</button></form>{% else %}<span style="color:var(--faint)">—</span>{% endif %}</td>
 </tr>
 {% endfor %}
 </table>

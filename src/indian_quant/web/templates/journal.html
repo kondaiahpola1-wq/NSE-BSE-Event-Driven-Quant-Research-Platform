@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Trade Journal{% endblock %}
+{% block nav_journal %}active{% endblock %}
+{% block content %}
+<h1>Trade Journal</h1>
+<p style="color:var(--dim);margin-top:6px">Every trade tells a story. Review, learn, improve.</p>
+
+<!-- Stats Cards -->
+<div class="grid grid-4" style="margin-top:20px">
+  <div class="card">
+    <div class="label">Total Trades</div>
+    <div class="value">{{ stats.total_trades or 0 }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Win Rate</div>
+    {% set total = stats.total_trades or 0 %}
+    {% set winners = stats.winners or 0 %}
+    <div class="value {% if total > 0 and winners/total > 0.5 %}good{% elif total > 0 and winners/total > 0.4 %}warn{% else %}bad{% endif %}">
+      {% if total > 0 %}{{ "%.1f"|format(winners/total*100) }}%{% else %}—{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Avg Net (bps)</div>
+    {% set avg = stats.avg_net_bps or 0 %}
+    <div class="value {% if avg > 0 %}good{% else %}bad{% endif %}">{{ "%.0f"|format(avg) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Reviewed</div>
+    <div class="value">{{ stats.reviewed or 0 }}/{{ total }}</div>
+  </div>
+</div>
+
+<!-- By Hypothesis -->
+<div class="section-title">By Hypothesis (₹10L each)</div>
+<div class="grid grid-4">
+  {% for name, h in by_hyp.items() %}
+  <div class="card">
+    <div class="label" style="font-size:11px">{% if name == 'delivery_momentum' %}Delivery Momentum{% elif name == 'circuit_breakout' %}Circuit Breakout{% elif name == 'surveillance_recovery' %}Surveillance Recovery{% elif name == 'announcement_alpha' %}Announcement Alpha{% else %}{{ name }}{% endif %} — ₹{{ '{:,.0f}'.format(h.allocated) if h.allocated is defined else '—' }}</div>
+    <div class="value" style="font-size:22px">₹{{ '{:,.0f}'.format(h.equity) if h.equity is defined else '—' }}</div>
+    <div class="sub">
+      {{ h.entries }} entries · <span class="{% if h.win_rate > 50 %}good{% elif h.win_rate < 40 %}bad{% endif %}">{{ h.win_rate|round(1) if h.win_rate is defined and h.win_rate is not none else '—' }}% win</span>
+      · {% if h.avg_net is not none %}<span class="{% if h.avg_net > 0 %}good{% elif h.avg_net < 0 %}bad{% endif %}">{{ h.avg_net|round(0) }}bps avg</span>{% else %}— avg{% endif %}
+    </div>
+    <div class="sub">
+      realized <span class="{% if h.realized_pnl is defined and h.realized_pnl > 0 %}good{% elif h.realized_pnl is defined and h.realized_pnl < 0 %}bad{% endif %}">{{ '%+.0f'|format(h.realized_pnl) if h.realized_pnl is defined else '—' }}</span>
+      · reviewed {{ h.reviewed }}/{{ h.entries }} · {{ h.open_count if h.open_count is defined else 0 }}/7 open
+    </div>
+    <div class="sub">
+      <a class="filter-btn" style="padding:2px 10px;font-size:12px" href="/journal?setup={{ name }}">View entries</a>
+      <a class="filter-btn" style="padding:2px 10px;font-size:12px" href="/positions?hypo={{ name }}">Live trades</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Filters -->
+<div class="filter-bar">
+  <span style="color:var(--faint);font-size:12px">Setup:</span>
+  <a href="/journal" class="filter-btn {% if not setup_filter %}active{% endif %}">All</a>
+  <a href="/journal?setup=delivery_momentum" class="filter-btn {% if setup_filter == 'delivery_momentum' %}active{% endif %}">Delivery Momentum</a>
+  <a href="/journal?setup=circuit_breakout" class="filter-btn {% if setup_filter == 'circuit_breakout' %}active{% endif %}">Circuit Breakout</a>
+  <a href="/journal?setup=surveillance_recovery" class="filter-btn {% if setup_filter == 'surveillance_recovery' %}active{% endif %}">Surveillance Recovery</a>
+  <div class="filter-sep"></div>
+  <span style="color:var(--faint);font-size:12px">Reviewed:</span>
+  <a href="/journal?setup={{ setup_filter }}" class="filter-btn {% if reviewed_filter == 'all' %}active{% endif %}">All</a>
+  <a href="/journal?setup={{ setup_filter }}&reviewed=yes" class="filter-btn {% if reviewed_filter == 'yes' %}active{% endif %}">Reviewed</a>
+  <a href="/journal?setup={{ setup_filter }}&reviewed=no" class="filter-btn {% if reviewed_filter == 'no' %}active{% endif %}">Pending</a>
+</div>
+
+<!-- Entries Table -->
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>Symbol</th>
+      <th>Setup</th>
+      <th>Entry</th>
+      <th>Exit</th>
+      <th>Net (bps)</th>
+      <th>Rating</th>
+      <th>Grade</th>
+      <th>Repeat?</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    <tr style="cursor:pointer" onclick="location.href='/journal/{{ e.id }}'">
+      <td>{% if e.review_date %}<span class="good">✓</span>{% else %}<span style="color:var(--faint)"> </span>{% endif %}</td>
+      <td class="mono" style="font-weight:bold">{{ e.symbol }}</td>
+      <td><span class="badge {% if e.setup_type == 'delivery_momentum' %}badge-green{% elif e.setup_type == 'circuit_breakout' %}badge-orange{% elif e.setup_type == 'surveillance_recovery' %}badge-purple{% else %}badge-red{% endif %}">{{ e.setup_type or '?' }}</span></td>
+      <td class="mono">{{ (e.entry_date or '?')[:10] }} @{{ "%.2f"|format(e.entry_price or 0) }}</td>
+      <td class="mono">{% if e.exit_date %}{{ e.exit_date[:10] }} @{{ "%.2f"|format(e.exit_price or 0) }}{% else %}<span class="warn">OPEN</span>{% endif %}</td>
+      <td class="mono {% if (e.net_bps or 0) > 0 %}good{% elif (e.net_bps or 0) < 0 %}bad{% endif %}">
+        {% if e.net_bps is not none %}{{ "%+.0f"|format(e.net_bps) }}{% else %}—{% endif %}
+      </td>
+      <td>{% if e.review_rating %}<span class="score-badge {% if e.review_rating >= 4 %}score-top{% elif e.review_rating >= 3 %}score-mid{% else %}score-low{% endif %}">{{ e.review_rating }}/5</span>{% else %}—{% endif %}</td>
+      <td class="mono">{{ e.setup_quality or '—' }}/{{ e.execution_grade or '—' }}</td>
+      <td>{% if e.would_repeat == true %}<span class="good">Yes</span>{% elif e.would_repeat == false %}<span class="bad">No</span>{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+    {% if not entries %}
+    <tr><td colspan="9" class="empty">No journal entries yet. Trades are auto-journalled when opened via paper_track.py snapshot.</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<!-- By Setup Breakdown -->
+{% if stats.by_setup %}
+<h2>Performance by Setup</h2>
+<table>
+  <thead>
+    <tr><th>Setup</th><th>Trades</th><th>Win Rate</th><th>Avg Net (bps)</th><th>Avg Rating</th></tr>
+  </thead>
+  <tbody>
+    {% for s in stats.by_setup %}
+    <tr>
+      <td class="mono">{{ s.setup_type }}</td>
+      <td>{{ s.n }}</td>
+      <td class="{% if (s.win_rate or 0) > 50 %}good{% else %}bad{% endif %}">{{ "%.0f"|format(s.win_rate or 0) }}%</td>
+      <td class="mono {% if (s.avg_net_bps or 0) > 0 %}good{% else %}bad{% endif %}">{{ "%.0f"|format(s.avg_net_bps or 0) }}</td>
+      <td>{{ "%.1f"|format(s.avg_rating or 0) }}/5</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<!-- Recent Lessons -->
+{% if stats.recent_lessons %}
+<h2>Recent Lessons</h2>
+<div class="card" style="margin-top:8px">
+  {% for l in stats.recent_lessons %}
+  <div style="padding:8px 0;border-bottom:1px solid var(--line)">
+    <span class="mono" style="font-weight:bold">{{ l.symbol }}</span>
+    <span class="{% if (l.net_bps or 0) > 0 %}good{% else %}bad{% endif %} mono">{{ "%+.0f"|format(l.net_bps or 0) }}bps</span>
+    <span style="color:var(--dim);margin-left:8px">{{ l.lessons_learned }}</span>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -16,10 +16,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import sqlalchemy as sa
-from indian_quant.web.prod_config import get_pg_engine
+from indian_quant.config.connections import get_engine
 
 
 def create_tables(engine: sa.engine.Engine) -> None:
@@ -272,6 +272,6 @@ def verify_tables(engine: sa.engine.Engine) -> None:
 
 
 if __name__ == "__main__":
-    engine = get_pg_engine()
+    engine = get_engine()
     create_tables(engine)
     verify_tables(engine)

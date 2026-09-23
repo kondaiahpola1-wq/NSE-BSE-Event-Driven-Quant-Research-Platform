@@ -38,12 +38,17 @@ def load_price_history(symbol: str, days: int = 252) -> pd.Series | None:
     if not parquet.exists():
         return None
     try:
-        df = pd.read_parquet(parquet, columns=["date", "close"])
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.sort_values("date").tail(days)
+        df = pd.read_parquet(parquet)
+        # Support both old ('date') and new ('timestamp') column names
+        date_col = "date" if "date" in df.columns else "timestamp"
+        close_col = "close"
+        if date_col not in df.columns or close_col not in df.columns:
+            return None
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df.sort_values(date_col).tail(days)
         if len(df) < 30:
             return None
-        return df.set_index("date")["close"]
+        return df.set_index(date_col)[close_col]
     except Exception:
         return None
 
@@ -56,10 +61,13 @@ def load_nifty_history(days: int = 252) -> pd.Series | None:
         p = Path(path)
         if p.exists():
             try:
-                df = pd.read_parquet(p, columns=["date", "close"])
-                df["date"] = pd.to_datetime(df["date"])
-                df = df.sort_values("date").tail(days)
-                return df.set_index("date")["close"]
+                df = pd.read_parquet(p)
+                date_col = "date" if "date" in df.columns else "timestamp"
+                if date_col not in df.columns or "close" not in df.columns:
+                    continue
+                df[date_col] = pd.to_datetime(df[date_col])
+                df = df.sort_values(date_col).tail(days)
+                return df.set_index(date_col)["close"]
             except Exception:
                 continue
 

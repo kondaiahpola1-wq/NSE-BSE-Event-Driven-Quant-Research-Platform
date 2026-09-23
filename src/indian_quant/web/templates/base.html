@@ -25,6 +25,7 @@ nav a.nav-link.active{color:var(--green)}
 h1{font-size:22px;color:var(--green)} h2{font-size:16px;margin:24px 0 12px}
 .grid{display:grid;gap:16px}
 .grid-4{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.grid-6{grid-template-columns:repeat(6,1fr)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px}
 .card .label{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
 .card .value{font-size:28px;font-weight:bold}
@@ -39,6 +40,7 @@ td{padding:8px 12px;border-bottom:1px solid rgba(28,42,66,.5)}
 .badge-green{color:var(--green);border:1px solid rgba(0,229,160,.35);background:rgba(0,229,160,.08)}
 .badge-red{color:var(--red);border:1px solid rgba(255,107,129,.35);background:rgba(255,107,129,.08)}
 .badge-orange{color:var(--orange);border:1px solid rgba(255,180,84,.35);background:rgba(255,180,84,.08)}
+.badge-purple{color:#b388ff;border:1px solid rgba(179,136,255,.35);background:rgba(179,136,255,.08)}
 .mono{font-family:var(--mono)}
 .section-title{font-size:13px;color:var(--green);margin:28px 0 12px;text-transform:uppercase;letter-spacing:1.5px;font-family:var(--mono)}
 .empty{color:var(--faint);padding:20px;text-align:center;font-style:italic}
@@ -57,6 +59,11 @@ td{padding:8px 12px;border-bottom:1px solid rgba(28,42,66,.5)}
 .score-mid{color:var(--orange);background:rgba(255,180,84,.12)}
 .score-low{color:var(--red);background:rgba(255,107,129,.12)}
 .row-hidden{display:none}
+.nav-dropdown{position:relative;display:inline-block}
+.nav-dropdown-menu{display:none;position:absolute;top:100%;left:0;min-width:200px;background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:1000;padding:4px 0}
+.nav-dropdown:hover .nav-dropdown-menu{display:block}
+.nav-dropdown-menu a{display:block;padding:8px 14px;color:var(--txt);text-decoration:none;font-size:13px;white-space:nowrap}
+.nav-dropdown-menu a:hover{background:var(--bg2);color:var(--green)}
 </style>
 </head>
 <body>
@@ -67,8 +74,20 @@ td{padding:8px 12px;border-bottom:1px solid rgba(28,42,66,.5)}
   {% if username %}
   <a class="nav-link {% block nav_watchlist %}{% endblock %}" href="/watchlist">Watchlist</a>
   {% endif %}
-  <a class="nav-link {% block nav_positions %}{% endblock %}" href="/positions">Positions</a>
-  <a class="nav-link {% block nav_suggestions %}{% endblock %}" href="/suggestions">Suggestions</a>
+  <div class="nav-dropdown">
+    <a class="nav-link {% block nav_hypotheses %}{% endblock %}" href="/hypotheses">Hypotheses ▾</a>
+    <div class="nav-dropdown-menu">
+      <a href="/hypothesis/1" target="_blank">Delivery Momentum</a>
+      <a href="/hypothesis/2" target="_blank">Circuit Breakout</a>
+      <a href="/hypothesis/3" target="_blank">Surveillance Recovery</a>
+      <a href="/hypothesis/4" target="_blank">Announcement Alpha</a>
+      <a href="/hypotheses" target="_blank" style="border-top:1px solid var(--line);color:var(--dim)">All Hypotheses</a>
+    </div>
+  </div>
+  <a class="nav-link {% block nav_backtest %}{% endblock %}" href="/backtest">Backtest</a>
+  <a class="nav-link {% block nav_positions %}{% endblock %}" href="/positions">Live Paper</a>
+  <a class="nav-link {% block nav_journal %}{% endblock %}" href="/journal">Journal</a>
+  <a class="nav-link {% block nav_analytics %}{% endblock %}" href="/analytics">Analytics</a>
   <a class="nav-link {% block nav_sectors %}{% endblock %}" href="/sectors">Sectors</a>
   <a class="nav-link {% block nav_risk %}{% endblock %}" href="/risk">Risk</a>
   <a class="nav-link {% block nav_research %}{% endblock %}" href="/research">Research</a>
