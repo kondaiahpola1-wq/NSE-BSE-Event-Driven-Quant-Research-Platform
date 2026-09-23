@@ -28,12 +28,13 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from indian_quant.config import load_settings
-from indian_quant.features.delivery import add_features, prepare_frame
+from indian_quant.features.delivery import add_features, conviction_score, prepare_frame
 from indian_quant.features.market_cap import classify_signals as classify_signals_mcap
+from indian_quant.features.security_type import classify_all_signals
 from indian_quant.ingestion.router import SourceRouter
 from indian_quant.web.prod_config import (
     REDIS_TTL,
-    ensure_pg_schema,
+    ensure_schema,
     get_pg_engine,
     get_redis_client,
 )
@@ -180,11 +181,24 @@ def compute_signal_for_stock(
 
         signal_type = None
         if pd.notna(last.get("deliv_z")) and pd.notna(last.get("ret_1d")):
-            if last["deliv_z"] >= 2 and last["ret_1d"] >= 0.005:
-                signal_type = "dz_hi_up"
-            elif last["deliv_z"] >= 2 and last["ret_1d"] <= -0.005:
+            dz = last["deliv_z"]
+            ret = last["ret_1d"]
+            rsi = last.get("rsi", 50)
+            macd_val = last.get("macd")
+            macd_sig = last.get("macd_signal")
+            sma20 = last.get("sma_20")
+
+            if dz >= 2 and ret >= 0.005:
+                # Apply technical confirmation filters for dz_hi_up
+                rsi_ok = 30 <= rsi <= 70 if pd.notna(rsi) else False
+                macd_ok = (pd.notna(macd_val) and pd.notna(macd_sig)
+                           and macd_val > macd_sig)
+                ma_ok = (pd.notna(sma20) and last["close"] > sma20)
+                if rsi_ok and macd_ok and ma_ok:
+                    signal_type = "dz_hi_up"
+            elif dz >= 2 and ret <= -0.005:
                 signal_type = "dz_hi_dn"
-            elif last["deliv_z"] <= -2 and last["ret_1d"] >= 0.005:
+            elif dz <= -2 and ret >= 0.005:
                 signal_type = "dz_lo_up"
 
         if signal_type is None:
@@ -221,6 +235,22 @@ def compute_signal_for_stock(
             else close * 0.03
         )
 
+        # Momentum and volatility features
+        momentum_20d = None
+        volatility_20d = None
+        if len(frame) >= 20:
+            close_20 = frame["close"].iloc[-20]
+            if close_20 > 0:
+                momentum_20d = round((close / close_20 - 1) * 100, 2)
+            log_returns = np.log(frame["close"] / frame["close"].shift(1)).dropna()
+            if len(log_returns) >= 20:
+                volatility_20d = round(float(log_returns.tail(20).std() * np.sqrt(252) * 100), 2)
+
+        # Conviction score for dz_hi_up signals
+        conv_score = 0.0
+        if signal_type == "dz_hi_up":
+            conv_score = conviction_score(last)
+
         return {
             "symbol": symbol,
             "exchange": exchange,
@@ -249,6 +279,9 @@ def compute_signal_for_stock(
             "stop_loss": round(close * 0.93, 2),
             "target_price": round(close * 1.05, 2),
             "volume": float(last.get("volume", 0)) if pd.notna(last.get("volume")) else 0,
+            "momentum_20d": momentum_20d,
+            "volatility_20d": volatility_20d,
+            "conviction_score": round(conv_score, 4),
         }
     except Exception:
         return None
@@ -294,7 +327,7 @@ def write_to_postgres(signals: list[dict]) -> None:
     import sqlalchemy as sa
 
     engine = get_pg_engine()
-    ensure_pg_schema()
+    ensure_schema()
 
     with engine.begin() as conn:
         conn.execute(sa.text("TRUNCATE TABLE cached_signals"))
@@ -375,6 +408,15 @@ def enrich_with_fundamentals(signals: list[dict]) -> list[dict]:
     except Exception:
         cp_dict = {}
 
+    # Fallback: load sector_map for symbols missing sector from company_profile
+    try:
+        sm_df = pd.read_sql(
+            "SELECT symbol, sector FROM sector_map", engine
+        )
+        sm_dict = sm_df.set_index("symbol").to_dict(orient="index")
+    except Exception:
+        sm_dict = {}
+
     for sig in signals:
         symbol = sig.get("symbol", "")
         kr = kr_dict.get(symbol, {})
@@ -391,8 +433,8 @@ def enrich_with_fundamentals(signals: list[dict]) -> list[dict]:
         sig["ev_to_ebitda"] = kr.get("ev_to_ebitda")
         sig["current_ratio"] = kr.get("current_ratio")
 
-        # Add sector/industry
-        sig["sector"] = cp.get("sector")
+        # Add sector/industry — fallback to sector_map if company_profile missing
+        sig["sector"] = cp.get("sector") or sm_dict.get(symbol, {}).get("sector")
         sig["industry"] = cp.get("industry")
         sig["company_name"] = cp.get("company_name")
 
@@ -473,6 +515,16 @@ def enrich_with_institutional(signals: list[dict]) -> list[dict]:
         # Compute institutional score (0-1)
         inst_score = 0.0
 
+        # Promoter holding score (from BSE shareholding summary)
+        promoter_pct = sig.get("promoter_pct")
+        if promoter_pct is not None:
+            if 25 <= promoter_pct <= 60:
+                inst_score += 0.30  # Healthy promoter range
+            elif 15 <= promoter_pct < 25:
+                inst_score += 0.15  # Lower but acceptable
+            elif promoter_pct > 60:
+                inst_score += 0.10  # Very high — some liquidity concern
+
         fii_chg = sig.get("fii_chg")
         if fii_chg is not None and fii_chg > 0:
             inst_score += 0.20
@@ -500,6 +552,10 @@ def enrich_with_institutional(signals: list[dict]) -> list[dict]:
             inst_score += 0.10
         elif fii_pct is not None and fii_pct > 10:
             inst_score += 0.05
+
+        # If we only have promoter data (no FII/DII), give partial credit
+        if promoter_pct is not None and fii_chg is None and dii_chg is None:
+            inst_score += 0.10  # Partial credit for having shareholding data
 
         sig["institutional_score"] = round(min(inst_score, 1.0), 4)
 
@@ -588,6 +644,9 @@ def main() -> int:
     for s in signals:
         if s.get("segment") == "SME" and s.get("market_cap_class") != "SME":
             s["market_cap_class"] = "SME"
+
+    # Classify security type (ETF, DEBT, INDEX, SME, EQUITY, UNKNOWN)
+    signals = classify_all_signals(signals)
 
     # Enrich with fundamentals + institutional data
     try:

@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Portfolio Analytics{% endblock %}
+{% block content %}
+<h1 style="margin-bottom:24px">Portfolio Analytics</h1>
+
+{% if analytics.total_combined == 0 %}
+<div class="card" style="text-align:center;padding:60px 20px">
+  <div style="font-size:48px;margin-bottom:16px">📊</div>
+  <h2>No closed trades yet</h2>
+  <p style="color:var(--faint);margin-top:8px">Analytics will appear after trades are settled via <code>paper_track.py settle</code></p>
+</div>
+{% else %}
+
+{# ── Risk Metrics ── #}
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card" style="border-left:3px solid {% if analytics.risk.win_rate_pct > 50 %}var(--green){% else %}var(--red){% endif %}">
+    <div class="label">Win Rate</div>
+    <div class="value {% if analytics.risk.win_rate_pct > 50 %}good{% else %}bad{% endif %}" style="font-size:28px">{{ analytics.risk.win_rate_pct }}%</div>
+    <div class="sub">{{ analytics.risk.total_trades }} trades total</div>
+  </div>
+  <div class="card" style="border-left:3px solid {% if analytics.risk.expectancy_bps > 0 %}var(--green){% else %}var(--red){% endif %}">
+    <div class="label">Expectancy</div>
+    <div class="value {% if analytics.risk.expectancy_bps > 0 %}good{% else %}bad{% endif %}" style="font-size:28px">{{ analytics.risk.expectancy_bps }} bps</div>
+    <div class="sub">avg per trade</div>
+  </div>
+  <div class="card" style="border-left:3px solid {% if analytics.risk.profit_factor > 1 %}var(--green){% else %}var(--red){% endif %}">
+    <div class="label">Profit Factor</div>
+    <div class="value {% if analytics.risk.profit_factor > 1 %}good{% else %}bad{% endif %}" style="font-size:28px">{{ analytics.risk.profit_factor }}</div>
+    <div class="sub">gross win / gross loss</div>
+  </div>
+  <div class="card" style="border-left:3px solid var(--blue)">
+    <div class="label">Sharpe Ratio</div>
+    <div class="value" style="font-size:28px">{{ analytics.risk.sharpe_ratio }}</div>
+    <div class="sub">Sortino: {{ analytics.risk.sortino_ratio }}</div>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:24px">
+  <div class="card">
+    <div class="label">Max Drawdown</div>
+    <div class="value bad" style="font-size:22px">{{ analytics.risk.max_drawdown_pct }}%</div>
+  </div>
+  <div class="card">
+    <div class="label">Avg Win</div>
+    <div class="value good" style="font-size:22px">+{{ analytics.risk.avg_win_bps }} bps</div>
+  </div>
+  <div class="card">
+    <div class="label">Avg Loss</div>
+    <div class="value bad" style="font-size:22px">{{ analytics.risk.avg_loss_bps }} bps</div>
+  </div>
+  <div class="card">
+    <div class="label">Avg Hold</div>
+    <div class="value" style="font-size:22px">{{ analytics.risk.avg_days_held }} days</div>
+  </div>
+</div>
+
+{# ── Equity Curve ── #}
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:24px">
+  <div class="card">
+    <div class="label">Equity Curve</div>
+    <div class="chart-container"><canvas id="equityChart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="label">Drawdown</div>
+    <div class="chart-container"><canvas id="ddChart"></canvas></div>
+  </div>
+</div>
+
+{# ── Monthly Performance ── #}
+{% if analytics.monthly %}
+<div class="card" style="margin-bottom:24px">
+  <div class="label">Monthly Performance</div>
+  <div class="chart-container" style="height:250px"><canvas id="monthlyChart"></canvas></div>
+</div>
+{% endif %}
+
+{# ── By Horizon + Exit Reason ── #}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+  {% if analytics.by_horizon %}
+  <div class="card">
+    <div class="label">Performance by Horizon</div>
+    <table>
+      <tr><th>Horizon</th><th>Trades</th><th>Avg BPS</th><th>Win Rate</th><th>Avg Days</th></tr>
+      {% for h in analytics.by_horizon %}
+      <tr>
+        <td><strong>{{ h.horizon }}</strong></td>
+        <td class="mono">{{ h.trades }}</td>
+        <td class="mono {% if h.avg_bps > 0 %}good{% else %}bad{% endif %}">{{ h.avg_bps }}</td>
+        <td class="mono">{{ h.win_rate }}%</td>
+        <td class="mono">{{ h.avg_days_held }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+
+  {% if analytics.by_exit_reason %}
+  <div class="card">
+    <div class="label">Performance by Exit Reason</div>
+    <table>
+      <tr><th>Reason</th><th>Trades</th><th>Avg BPS</th><th>Win Rate</th></tr>
+      {% for r in analytics.by_exit_reason %}
+      <tr>
+        <td><span class="badge {% if r.reason == 'STOP' %}badge-red{% else %}badge-green{% endif %}">{{ r.reason }}</span></td>
+        <td class="mono">{{ r.trades }}</td>
+        <td class="mono {% if r.avg_bps > 0 %}good{% else %}bad{% endif %}">{{ r.avg_bps }}</td>
+        <td class="mono">{{ r.win_rate }}%</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+{# ── Streaks + Best/Worst ── #}
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:24px">
+  <div class="card">
+    <div class="label">Win/Loss Streaks</div>
+    <table>
+      <tr><td>Max Win Streak</td><td class="mono good">{{ analytics.streaks.max_win_streak }}</td></tr>
+      <tr><td>Max Loss Streak</td><td class="mono bad">{{ analytics.streaks.max_loss_streak }}</td></tr>
+      <tr><td>Current</td><td class="mono {% if analytics.streaks.streak_type == 'win' %}good{% else %}bad{% endif %}">
+        {{ analytics.streaks.current_streak }} {{ analytics.streaks.streak_type }}
+      </td></tr>
+    </table>
+  </div>
+  <div class="card" style="border-left:3px solid var(--green)">
+    <div class="label">Best Trade</div>
+    {% if analytics.best_trade %}
+    <div class="value good" style="font-size:22px">{{ analytics.best_trade.symbol }}</div>
+    <div class="sub">+{{ analytics.best_trade.bps }} bps · {{ analytics.best_trade.exit_date }}</div>
+    {% else %}
+    <div class="empty">No trades yet</div>
+    {% endif %}
+  </div>
+  <div class="card" style="border-left:3px solid var(--red)">
+    <div class="label">Worst Trade</div>
+    {% if analytics.worst_trade %}
+    <div class="value bad" style="font-size:22px">{{ analytics.worst_trade.symbol }}</div>
+    <div class="sub">{{ analytics.worst_trade.bps }} bps · {{ analytics.worst_trade.exit_date }}</div>
+    {% else %}
+    <div class="empty">No trades yet</div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── Recent Trades ── #}
+{% if analytics.recent_trades %}
+<div class="card" style="margin-bottom:24px">
+  <div class="label">Recent Closed Trades (last 20)</div>
+  <table>
+    <tr><th>Symbol</th><th>Exit Date</th><th>Reason</th><th>Days</th><th>Entry</th><th>Exit</th><th>Net BPS</th></tr>
+    {% for t in analytics.recent_trades %}
+    <tr>
+      <td><strong>{{ t.symbol }}</strong></td>
+      <td style="font-size:12px">{{ t.exit_date }}</td>
+      <td><span class="badge {% if t.exit_reason == 'STOP' %}badge-red{% else %}badge-green{% endif %}">{{ t.exit_reason }}</span></td>
+      <td class="mono">{{ t.days_held }}</td>
+      <td class="mono">₹{{ t.entry_px }}</td>
+      <td class="mono">₹{{ t.exit_px }}</td>
+      <td class="mono {% if t.net_bps > 0 %}good{% else %}bad{% endif %}">{{ t.net_bps }} bps</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<script>
+// Equity Curve
+if ({{ analytics.equity.dates|safe }}.length > 0) {
+  new Chart(document.getElementById('equityChart'), {
+    type: 'line',
+    data: {
+      labels: {{ analytics.equity.dates|safe }},
+      datasets: [{
+        label: 'Equity (₹)',
+        data: {{ analytics.equity.equity|safe }},
+        borderColor: '#4da3ff',
+        backgroundColor: 'rgba(77,163,255,.1)',
+        fill: true,
+        borderWidth: 2,
+        pointRadius: 2,
+        tension: 0.3
+      }]
+    },
+    options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{color:'#4a5d80',maxTicksLimit:10,font:{size:10}},grid:{color:'rgba(28,42,66,.4)'}},y:{ticks:{color:'#4a5d80',font:{size:10},callback:v=>'₹'+v.toLocaleString()},grid:{color:'rgba(28,42,66,.4)'}}}}
+  });
+
+  // Drawdown
+  new Chart(document.getElementById('ddChart'), {
+    type: 'line',
+    data: {
+      labels: {{ analytics.equity.dates|safe }},
+      datasets: [{
+        label: 'Drawdown %',
+        data: {{ analytics.equity.drawdown|safe }},
+        borderColor: '#ff6b81',
+        backgroundColor: 'rgba(255,107,129,.2)',
+        fill: true,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.3
+      }]
+    },
+    options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{display:false},y:{ticks:{color:'#4a5d80',font:{size:10},callback:v=>v+'%'},grid:{color:'rgba(28,42,66,.4)'}}}}
+  });
+}
+
+// Monthly chart
+{% if analytics.monthly %}
+new Chart(document.getElementById('monthlyChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ analytics.monthly|map(attribute='month')|list|safe }},
+    datasets: [{
+      label: 'Avg BPS',
+      data: {{ analytics.monthly|map(attribute='avg_bps')|list|safe }},
+      backgroundColor: {{ analytics.monthly|map(attribute='avg_bps')|list|safe }}.map(v => v > 0 ? 'rgba(0,229,160,.6)' : 'rgba(255,107,129,.6)'),
+      borderWidth: 0
+    }]
+  },
+  options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{color:'#4a5d80',font:{size:10}},grid:{display:false}},y:{ticks:{color:'#4a5d80',font:{size:10}},grid:{color:'rgba(28,42,66,.4)'}}}}
+});
+{% endif %}
+</script>
+
+{% endif %}
+{% endblock %}

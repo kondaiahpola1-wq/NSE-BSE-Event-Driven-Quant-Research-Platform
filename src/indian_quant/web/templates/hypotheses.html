@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Hypotheses{% endblock %}
+{% block nav_hypotheses %}active{% endblock %}
+
+{% block content %}
+<div class="container">
+  <h1 style="margin-bottom:6px">Trading Hypotheses</h1>
+  <p style="color:var(--dim);margin-bottom:24px;font-size:13px">
+    Each hypothesis tests a different market edge. Top 7 signals traded per hypothesis. All analytics public.
+  </p>
+
+  <!-- Comparison Table -->
+  <div class="section-title">Hypothesis Comparison</div>
+  <div class="card" style="overflow-x:auto;margin-bottom:28px">
+    <table>
+      <tr>
+        <th>Hypothesis</th>
+        <th>Stocks</th>
+        <th>Total</th>
+        <th>Open</th>
+        <th>Settled</th>
+        <th>Win %</th>
+        <th>Avg Net BPS</th>
+        <th>Capital</th>
+        <th>Status</th>
+      </tr>
+      {% for h in hypotheses %}
+      {% set s = summaries[h.id] %}
+      {% set ts = s.trade_summary %}
+      <tr style="cursor:pointer" onclick="location.href='/hypothesis/{{ h.id }}'">
+        <td style="font-weight:600">{{ h.name | replace('_', ' ') | title }}</td>
+        <td class="mono">{{ s.stock_count }}</td>
+        <td class="mono">{{ ts.total or 0 }}</td>
+        <td class="mono">{{ ts.open or 0 }}</td>
+        <td class="mono">{{ ts.settled or 0 }}</td>
+        <td class="mono">{% if ts.win_rate is defined %}{{ "%.0f" | format(ts.win_rate) }}%{% else %}-{% endif %}</td>
+        <td class="mono" style="color:{% if (ts.avg_net_bps or 0) > 0 %}var(--green){% elif (ts.avg_net_bps or 0) < 0 %}var(--red){% else %}var(--dim){% endif %}">
+          {% if ts.avg_net_bps is not none %}{{ "%.1f" | format(ts.avg_net_bps) }}{% else %}-{% endif %}
+        </td>
+        <td class="mono">₹{{ "%.0f" | format(ts.capital_deployed or 0) }}</td>
+        <td>
+          {% if h.is_active %}
+          <span class="badge badge-green">ACTIVE</span>
+          {% else %}
+          <span class="badge badge-red">INACTIVE</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <!-- Performance Chart -->
+  <div class="section-title">Performance Comparison</div>
+  <div class="card" style="margin-bottom:28px">
+    <div class="chart-container" style="height:300px">
+      <canvas id="perfChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="grid grid-4" style="margin-bottom:32px">
+    {% for h in hypotheses %}
+    {% set s = summaries[h.id] %}
+    {% set ts = s.trade_summary %}
+    <a href="/hypothesis/{{ h.id }}" class="card" style="text-decoration:none;cursor:pointer;border-color:{% if h.is_active %}var(--line){% else %}var(--red){% endif %}">
+      <div class="label">{{ h.name | replace('_', ' ') | title }}</div>
+      <div style="font-size:15px;font-weight:600;color:var(--txt);margin:6px 0">{{ ts.settled or 0 }} trades</div>
+      <div style="display:flex;gap:16px;font-size:12px;color:var(--dim)">
+        <span>{{ s.stock_count }} stocks</span>
+        <span>{{ ts.open or 0 }} open</span>
+      </div>
+      {% if ts.avg_net_bps is not none %}
+      <div style="margin-top:10px;font-size:13px">
+        <span style="color:{% if ts.avg_net_bps > 0 %}var(--green){% else %}var(--red){% endif %}">
+          {{ "%.1f" | format(ts.avg_net_bps) }} bps avg
+        </span>
+        <span style="color:var(--dim);margin-left:8px">{{ "%.0f" | format(ts.win_rate or 0) }}% win</span>
+      </div>
+      {% else %}
+      <div style="margin-top:10px;font-size:12px;color:var(--faint)">No settled trades yet</div>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+
+  <!-- Open Trades Overview -->
+  {% set has_open = false %}
+  {% for h in hypotheses %}
+    {% set s = summaries[h.id] %}
+    {% if s.trade_summary.open is not none and s.trade_summary.open > 0 %}
+      {% set has_open = true %}
+    {% endif %}
+  {% endfor %}
+  {% if has_open %}
+  <div class="section-title">All Open Trades</div>
+  <div class="card">
+    <table>
+      <tr><th>Hypothesis</th><th>Symbol</th><th>Entry Date</th><th>Entry ₹</th><th>Qty</th><th>Value</th><th>Stop</th><th>Horizon</th></tr>
+      {% for h in hypotheses %}
+      {% set trades = summaries[h.id].open_trades if summaries[h.id].open_trades is defined else [] %}
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+const ctx = document.getElementById('perfChart');
+if (ctx) {
+  const hypNames = [{% for h in hypotheses %}'{{ h.name | replace('_', ' ') | title }}'{% if not loop.last %},{% endif %}{% endfor %}];
+  const avgBps = [{% for h in hypotheses %}{% set ts = summaries[h.id].trade_summary %}{{ ts.avg_net_bps or 0 }}{% if not loop.last %},{% endif %}{% endfor %}];
+  const winRates = [{% for h in hypotheses %}{% set ts = summaries[h.id].trade_summary %}{{ ts.win_rate or 0 }}{% if not loop.last %},{% endif %}{% endfor %}];
+  const colors = avgBps.map(v => v >= 0 ? 'rgba(0,229,160,0.7)' : 'rgba(255,107,129,0.7)');
+
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: hypNames,
+      datasets: [{
+        label: 'Avg Net BPS',
+        data: avgBps,
+        backgroundColor: colors,
+        borderColor: colors.map(c => c.replace('0.7', '1')),
+        borderWidth: 1,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            afterLabel: function(context) {
+              return 'Win Rate: ' + winRates[context.dataIndex].toFixed(1) + '%';
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          grid: { color: 'rgba(28,42,66,0.5)' },
+          ticks: { color: '#7d90b5', font: { size: 11 } },
+          title: { display: true, text: 'Avg Net BPS', color: '#7d90b5' }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: '#7d90b5', font: { size: 11 } }
+        }
+      }
+    }
+  });
+}
+</script>
+{% endblock %}

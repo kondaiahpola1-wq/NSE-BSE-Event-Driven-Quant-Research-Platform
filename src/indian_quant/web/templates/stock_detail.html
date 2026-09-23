@@ -9,20 +9,28 @@
     <h1 style="margin-bottom:4px">
       {{ a.symbol }}
       <span style="font-size:14px;color:var(--dim);font-weight:normal;margin-left:8px">{{ a.exchange }} · {{ a.segment }}</span>
+      {% if a.from_cache %}<span class="badge" style="font-size:11px;border:1px solid var(--dim);color:var(--dim);margin-left:8px">Cached Signal</span>{% endif %}
     </h1>
     <div style="font-size:28px;font-weight:bold;margin-top:4px">
       ₹{{ '%.2f'|format(a.latest_close) }}
+      {% if a.ret_1d_pct is not none %}
       <span style="font-size:16px;margin-left:8px;{% if a.ret_1d_pct > 0 %}color:var(--green){% elif a.ret_1d_pct < 0 %}color:var(--red){% endif %}">
         {% if a.ret_1d_pct > 0 %}+{% endif %}{{ a.ret_1d_pct }}%
       </span>
+      {% endif %}
     </div>
-    <div style="font-size:12px;color:var(--faint);margin-top:4px">Data through {{ a.latest_date }}</div>
+    <div style="font-size:12px;color:var(--faint);margin-top:4px">
+      {{ a.latest_date }}
+      {% if a.sector %} · {{ a.sector }}{% endif %}
+    </div>
   </div>
   <div style="text-align:right">
     {% if a.signal_type == 'dz_hi_up' %}
       <span class="badge badge-green" style="font-size:14px;padding:8px 16px">🟢 ACCUMULATION</span>
     {% elif a.signal_type == 'dz_hi_dn' %}
       <span class="badge badge-red" style="font-size:14px;padding:8px 16px">🔴 AVOID</span>
+    {% elif a.signal_type %}
+      <span class="badge" style="font-size:14px;padding:8px 16px;border:1px solid var(--blue);color:var(--blue)">{{ a.signal_type }}</span>
     {% else %}
       <span class="badge" style="font-size:14px;padding:8px 16px;border:1px solid var(--line);color:var(--faint)">No Active Signal</span>
     {% endif %}
@@ -65,27 +73,57 @@
 <div class="grid grid-4" style="margin-top:16px">
   <div class="card" style="border-left:3px solid var(--blue)">
     <div class="label">Entry Zone</div>
-    <div class="value" style="font-size:20px">₹{{ a.entry_zone_low }} — ₹{{ a.entry_zone_high }}</div>
+    <div class="value" style="font-size:20px">{% if a.entry_zone_low %}₹{{ a.entry_zone_low }} — ₹{{ a.entry_zone_high }}{% else %}—{% endif %}</div>
   </div>
   <div class="card" style="border-left:3px solid var(--red)">
     <div class="label">Stop Loss</div>
-    <div class="value bad" style="font-size:20px">₹{{ a.stop_loss }}</div>
+    <div class="value bad" style="font-size:20px">{% if a.stop_loss %}₹{{ a.stop_loss }}{% else %}—{% endif %}</div>
     <div class="sub">-7.0%</div>
   </div>
   <div class="card" style="border-left:3px solid var(--green)">
     <div class="label">Target</div>
-    <div class="value good" style="font-size:20px">₹{{ a.target_price }}</div>
+    <div class="value good" style="font-size:20px">{% if a.target_price %}₹{{ a.target_price }}{% else %}—{% endif %}</div>
     <div class="sub">+5.0%</div>
   </div>
   <div class="card">
     <div class="label">SMA Trend</div>
     <div class="value" style="font-size:18px">
-      {% if a.sma_20 %}<span class="{% if a.latest_close > a.sma_20 %}good{% else %}bad{% endif %}">SMA20: ₹{{ '%.0f'|format(a.sma_20) }}</span>{% endif %}
-    </div>
+      {% if a.sma_20 %}<span class="{% if a.latest_close and a.sma_20 and a.latest_close > a.sma_20 %}good{% else %}bad{% endif %}">SMA20: ₹{{ '%.0f'|format(a.sma_20) }}</span>{% else %}—{% endif %}</div>
     <div class="sub">{% if a.sma_50 %}SMA50: ₹{{ '%.0f'|format(a.sma_50) }}{% endif %}</div>
   </div>
 </div>
 
+{% if a.market_cap_cr or a.pe_trailing or a.roe %}
+<div class="grid grid-4" style="margin-top:16px">
+  {% if a.market_cap_cr %}
+  <div class="card">
+    <div class="label">Market Cap</div>
+    <div class="value" style="font-size:18px">{% if a.market_cap_cr >= 10000 %}₹{{ '%.0f'|format(a.market_cap_cr / 100) }}K Cr{% else %}₹{{ '%.0f'|format(a.market_cap_cr) }} Cr{% endif %}</div>
+    <div class="sub">{{ a.market_cap_class or '' }}</div>
+  </div>
+  {% endif %}
+  {% if a.pe_trailing %}
+  <div class="card">
+    <div class="label">P/E Ratio</div>
+    <div class="value" style="font-size:18px">{{ '%.1f'|format(a.pe_trailing) }}</div>
+  </div>
+  {% endif %}
+  {% if a.price_to_book %}
+  <div class="card">
+    <div class="label">P/B Ratio</div>
+    <div class="value" style="font-size:18px">{{ '%.2f'|format(a.price_to_book) }}</div>
+  </div>
+  {% endif %}
+  {% if a.roe %}
+  <div class="card">
+    <div class="label">ROE</div>
+    <div class="value" style="font-size:18px {% if a.roe > 15 %}good{% elif a.roe < 0 %}bad{% endif %}">{{ '%.1f'|format(a.roe) }}%</div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if not a.from_cache %}
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px">
   <div class="card">
     <div class="label">Price + SMA (60 days)</div>
@@ -96,6 +134,7 @@
     <div class="chart-container"><canvas id="delivChart"></canvas></div>
   </div>
 </div>
+{% endif %}
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
   <div class="card">
@@ -104,9 +143,9 @@
       <tr><td>RSI (14)</td><td class="mono">{{ '%.1f'|format(a.rsi) if a.rsi is not none else '—' }}</td></tr>
       <tr><td>MACD</td><td class="mono">{{ '%.2f'|format(a.macd) if a.macd is not none else '—' }}</td></tr>
       <tr><td>MACD Signal</td><td class="mono">{{ '%.2f'|format(a.macd_signal) if a.macd_signal is not none else '—' }}</td></tr>
-      <tr><td>SMA 20</td><td class="mono">₹{{ '%.2f'|format(a.sma_20) if a.sma_20 is not none else '—' }}</td></tr>
-      <tr><td>SMA 50</td><td class="mono">₹{{ '%.2f'|format(a.sma_50) if a.sma_50 is not none else '—' }}</td></tr>
-      <tr><td>ATR (14)</td><td class="mono">₹{{ '%.2f'|format(a.atr_14) if a.atr_14 else '—' }}</td></tr>
+      <tr><td>SMA 20</td><td class="mono">{% if a.sma_20 %}₹{{ '%.2f'|format(a.sma_20) }}{% else %}—{% endif %}</td></tr>
+      <tr><td>SMA 50</td><td class="mono">{% if a.sma_50 %}₹{{ '%.2f'|format(a.sma_50) }}{% else %}—{% endif %}</td></tr>
+      <tr><td>ATR (14)</td><td class="mono">{% if a.atr_14 %}₹{{ '%.2f'|format(a.atr_14) }}{% else %}—{% endif %}</td></tr>
     </table>
   </div>
   <div class="card">
@@ -129,10 +168,231 @@
   </div>
 </div>
 
+{% if a.symbol == 'IZMO' %}
+<!-- ═══════════════════════════════════════════════════════════════
+     IZMO — Comprehensive Multibagger Analysis
+     ═══════════════════════════════════════════════════════════════ -->
+<div style="margin-top:32px">
+  <div class="section-title">IZMO — Multibagger Thesis | Semicon 2.0 | Phases</div>
+
+  <!-- Company Profile -->
+  <div class="grid grid-4" style="margin-bottom:20px">
+    <div class="card">
+      <div class="label">Company</div>
+      <div class="value" style="font-size:16px">IZMO Limited</div>
+      <div class="sub">NSE: IZMO | BSE: 532341</div>
+    </div>
+    <div class="card">
+      <div class="label">HQ / Sector</div>
+      <div class="value" style="font-size:16px">Bengaluru</div>
+      <div class="sub">Semicon Packaging · Defense</div>
+    </div>
+    <div class="card">
+      <div class="label">Latest Close</div>
+      <div class="value good" style="font-size:16px">₹{{ '%.2f'|format(a.latest_close) if a.latest_close else '—' }}</div>
+      <div class="sub">Market Cap: ~₹150 Cr</div>
+    </div>
+    <div class="card">
+      <div class="label">Semicon 2.0</div>
+      <div class="value" style="font-size:16px">₹1,27,500 Cr</div>
+      <div class="sub">Approved Jul 15, 2026</div>
+    </div>
+  </div>
+
+  <!-- Business Segments -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-title">Business Segments (FY26 Revenue Mix)</div>
+    <table>
+      <tr><th>Segment</th><th>FY26 Mix</th><th>FY25 Mix</th><th>Growth</th></tr>
+      <tr><td>izmo Studio (Automotive Marketing)</td><td>44%</td><td>51%</td><td class="good">Stable</td></tr>
+      <tr><td>izmo Cars (Automotive E-Retail)</td><td>26%</td><td>27%</td><td class="neutral">Flat</td></tr>
+      <tr><td>Frog Data (Data Analytics)</td><td>22%</td><td>14%</td><td class="good">+57% YoY</td></tr>
+      <tr><td>izmo Microsystems (Semicon)</td><td>9%</td><td>7%</td><td class="good">+28% YoY</td></tr>
+    </table>
+    <div class="sub" style="margin-top:8px">Revenue CAGR: 3Yr 24% · 5Yr 19% · Revenue 1Yr CAGR: 37%</div>
+  </div>
+
+  <!-- Semicon 2.0 & Fund Raise -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-title">SEMICON 2.0 & Fund Raise — Key Catalyst</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div class="label">Semicon 2.0 Outlay</div>
+        <div class="value good" style="font-size:22px">₹1,27,500 Cr</div>
+        <div class="sub">Approved by Union Cabinet on 15 July 2026</div>
+        <div style="margin-top:8px;font-size:13px;color:var(--dim)">
+          Focus on ATMP/OSAT (Assembly, Testing, Marking, Packaging). izmo Microsystems is a key beneficiary.
+        </div>
+      </div>
+      <div>
+        <div class="label">Fund Raise Plan</div>
+        <div class="value warn" style="font-size:22px">₹200–300 Cr</div>
+        <div class="sub">Equity-cum-debt (in process)</div>
+        <div style="margin-top:8px;font-size:13px;color:var(--dim)">
+          Seeking external funding for izmo Microsystems expansion. Talks with multiple investors. Board approved on 13 Nov 2025.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Q1 FY27 Results -->
+  <div class="grid grid-4" style="margin-bottom:16px">
+    <div class="card">
+      <div class="label">Q1 FY27 Net Profit</div>
+      <div class="value good" style="font-size:20px">₹122M</div>
+      <div class="sub">+103% YoY</div>
+    </div>
+    <div class="card">
+      <div class="label">EBITDA Margin</div>
+      <div class="value good" style="font-size:20px">25.07%</div>
+      <div class="sub">Expanding</div>
+    </div>
+    <div class="card">
+      <div class="label">Q4 FY26 PAT</div>
+      <div class="value good" style="font-size:20px">₹17.3 Cr</div>
+      <div class="sub">+151% YoY</div>
+    </div>
+    <div class="card">
+      <div class="label">Izmo Micro FY27 Target</div>
+      <div class="value" style="font-size:20px">₹50 Cr</div>
+      <div class="sub">Revenue target</div>
+    </div>
+  </div>
+
+  <!-- Key Strategic Wins -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-title">Strategic Wins — izmo Microsystems</div>
+    <table>
+      <tr><th>Date</th><th>Development</th><th>Significance</th></tr>
+      <tr><td>Sep 1, 2026</td><td>Commenced indigenous 40 GHz RF package shipments for defense</td><td class="good">Defense electronics entry</td></tr>
+      <tr><td>Jul 15, 2026</td><td>Semicon 2.0 approved (₹1,27,500 Cr)</td><td class="good">Major policy tailwind</td></tr>
+      <tr><td>Apr 27, 2026</td><td>Recognized as Key Packaging Partner, National Silicon Photonics Mission</td><td class="good">Govt recognition</td></tr>
+      <tr><td>Apr 1, 2026</td><td>Expanded defense electronics supply chain</td><td class="good">Atma Nirbhar Bharat</td></tr>
+      <tr><td>Mar 9, 2026</td><td>Entered defense electronics value chain</td><td class="good">New revenue vertical</td></tr>
+      <tr><td>Jun 2026</td><td>MoU with CCRAFT SA (Swiss LiNbO₃) & Alcyon Photonics (Spain)</td><td class="good">Photonic IC packaging</td></tr>
+      <tr><td>Apr 2026</td><td>Photonic IC Packaging Partner at CPPICS, IIT Madras (MeitY)</td><td class="good">National mission</td></tr>
+      <tr><td>Jan 12, 2026</td><td>3D SiP module designed for Space Payload Camera Electronics</td><td class="good">Space applications</td></tr>
+      <tr><td>Aug 2026</td><td>Q1 FY27: Revenue growth, PAT +103%, EBITDA margin 25%</td><td class="good">Profitable scaling</td></tr>
+    </table>
+  </div>
+
+  <!-- Multibagger Analysis -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-title">Multibagger Analysis — Entry, Exit, Phases</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div>
+        <div class="label">Current Phase</div>
+        <div class="value warn" style="font-size:20px">PHASE 3 — Acceleration</div>
+        <div class="sub" style="font-size:13px">Izmo Micro scaling from 9% to 25%+ of revenue. Defense orders materializing. Fund raise in progress.</div>
+      </div>
+      <div>
+        <div class="label">Entry Zone</div>
+        <div class="value good" style="font-size:20px">₹888–934</div>
+        <div class="sub">SMA20 support zone. Current price ₹920.72 near entry.</div>
+      </div>
+      <div>
+        <div class="label">Stop Loss</div>
+        <div class="value bad" style="font-size:20px">₹869 (-7%)</div>
+        <div class="sub">Below SMA20 and entry zone.</div>
+      </div>
+      <div>
+        <div class="label">Target (Short)</div>
+        <div class="value" style="font-size:20px">₹981 (+5%)</div>
+        <div class="sub">SMA50 resistance. Break above = new leg.</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div class="label">Multibagger Phases</div>
+      <table>
+        <tr><th>Phase</th><th>Period</th><th>Driver</th><th>Expected Move</th><th>Status</th></tr>
+        <tr><td><b>Phase 1</b> — Foundation</td><td>2007–2024</td><td>Automotive e-retail, IPO listing</td><td>~₹50 → ₹400</td><td class="good">Complete</td></tr>
+        <tr><td><b>Phase 2</b> — Diversification</td><td>2024–2025</td><td>izmo Micro launch, Frog Data growth</td><td>₹400 → ₹700</td><td class="good">Complete</td></tr>
+        <tr><td><b>Phase 3</b> — Acceleration</td><td>2026–2027</td><td>Defense orders, Semicon 2.0, fund raise</td><td>₹700 → ₹1,500+</td><td class="warn">IN PROGRESS</td></tr>
+        <tr><td><b>Phase 4</b> — Scale</td><td>2027–2029</td><td>₹200 Cr fund deployment, ₹50 Cr Micro revenue</td><td>₹1,500 → ₹3,000+</td><td class="neutral">Future</td></tr>
+        <tr><td><b>Phase 5</b> — Multibagger</td><td>2029+</td><td>Photonic IC packaging leader, Space/Defense</td><td>₹3,000 → ₹5,000+</td><td class="neutral">Future</td></tr>
+      </table>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div class="label">Multibagger Thesis — Will IZMO Be a Multibagger?</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:13px;color:var(--green);margin-bottom:4px">✅ Bull Case (Multibagger)</div>
+          <ul style="font-size:13px;color:var(--txt);margin-left:16px">
+            <li>Semicon 2.0 ₹1.27L Cr outlay — direct beneficiary</li>
+            <li>Defense electronics — high margin, govt mandate</li>
+            <li>Photonic IC packaging — rare capability in India</li>
+            <li>3D SiP for space payloads — unique technology</li>
+            <li>Q1 FY27 PAT +103% — accelerating profitability</li>
+            <li>EBITDA margin expanding to 25%</li>
+            <li>₹200–300 Cr fund raise → capacity expansion</li>
+            <li>MoU with CCRAFT SA & Alcyon Photonics — global moats</li>
+            <li>Small cap (~₹150 Cr) → high leverage to growth</li>
+          </ul>
+        </div>
+        <div>
+          <div style="font-size:13px;color:var(--red);margin-bottom:4px">⚠️ Risk Factors</div>
+          <ul style="font-size:13px;color:var(--txt);margin-left:16px">
+            <li>Fund raise not yet closed — execution risk</li>
+            <li>Defense contracts take time to scale</li>
+            <li>Semicon 2.0 allocation may be slow</li>
+            <li>Small cap volatility — 7% stop loss</li>
+            <li>Current price near SMA50 (₹971) resistance</li>
+            <li>RSI at 70.3 — short-term overbought</li>
+            <li>Revenue still 67% from North America (FX risk)</li>
+            <li>izmo Micro only 9% of revenue today</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="label">Current Phase Assessment</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <div style="font-size:14px;font-weight:bold;color:var(--orange)">Phase 3 — Acceleration (CURRENT)</div>
+          <div style="font-size:13px;color:var(--txt);margin-top:4px">
+            izmo Microsystems is scaling from 9% to 25%+ of revenue. Defense orders have commenced (40 GHz RF package shipments). Semicon 2.0 policy tailwind is active. Fund raise of ₹200–300 Cr is in process (equity-cum-debt). EBITDA margin expanding. PAT growing 100%+ YoY.
+          </div>
+        </div>
+        <div>
+          <div style="font-size:14px;font-weight:bold;color:var(--blue)">Next Trigger Events</div>
+          <div style="font-size:13px;color:var(--txt);margin-top:4px">
+            1. Fund raise closure (₹200–300 Cr) → capacity expansion<br>
+            2. Defense order book announcement<br>
+            3. izmo Micro revenue crossing ₹50 Cr (FY27 target)<br>
+            4. Photonic IC packaging contract scale-up<br>
+            5. Potential listing of izmo Microsystems separately
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="card" style="margin-bottom:16px;border-left:3px solid var(--green)">
+    <div class="section-title">Summary — IZMO Multibagger Verdict</div>
+    <div style="font-size:14px;line-height:1.8">
+      <b>Current Price:</b> ₹920.72 &nbsp;|&nbsp; <b>Entry:</b> ₹888–934 &nbsp;|&nbsp; <b>Stop:</b> ₹869 (-7%) &nbsp;|&nbsp; <b>Target:</b> ₹981 (short) / ₹1,500+ (Phase 3) / ₹3,000+ (Phase 4)<br><br>
+      <b>Current Phase:</b> Phase 3 — Acceleration<br>
+      <b>Semicon 2.0:</b> ₹1,27,500 Cr policy tailwind — izmo Microsystems is a key beneficiary<br>
+      <b>Fund Raise:</b> ₹200–300 Cr (equity-cum-debt) in process — critical for scaling<br>
+      <b>Q1 FY27:</b> PAT +103%, EBITDA margin 25% — profitable scaling<br>
+      <b>Multibagger Potential:</b> YES — Small cap with rare photonic IC packaging capability, defense entry, and Semicon 2.0 tailwind.<br>
+      <b>Risk:</b> Fund raise not closed, defense scaling takes time, small cap volatility.<br><br>
+      <b>Recommendation:</b> ACCUMULATE near ₹888–934. Stop loss at ₹869. Target ₹1,500+ over 18–24 months if Phase 3 plays out. Paper order recommended via Announcement Alpha watchlist.
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div style="margin-top:16px;text-align:right">
   <a href="/announcements/{{ a.symbol }}" style="font-size:13px;color:var(--blue)">View Announcements →</a>
 </div>
 
+{% if not a.from_cache %}
 <script>
 const priceDates = {{ a.price_dates|safe }};
 const priceCloses = {{ a.price_closes|safe }};
@@ -162,7 +422,10 @@ new Chart(document.getElementById('delivChart'), {
   },
   options: {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false},annotation:{}}, scales:{x:{ticks:{color:'#4a5d80',maxTicksLimit:8,font:{size:10}},grid:{display:false}},y:{ticks:{color:'#4a5d80',font:{size:10}},grid:{color:'rgba(28,42,66,.4)'}}}}
 });
+</script>
+{% endif %}
 
+<script>
 function addToWatchlist() {
   fetch('/api/watchlist/add', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({symbol:'{{ a.symbol }}'})})
     .then(r=>r.json()).then(d => { if(d.ok) location.reload(); else alert(d.error||'Failed'); });
@@ -172,7 +435,7 @@ function addToWatchlist() {
 {% else %}
 <div style="text-align:center;margin-top:80px">
   <h1 style="margin-bottom:12px">{{ symbol }}</h1>
-  <p style="color:var(--faint);font-size:16px">No delivery data available for this symbol</p>
+  <p style="color:var(--faint);font-size:16px">No data available for this symbol</p>
   <p style="margin-top:20px"><a href="/watchlist">← Back to Watchlist</a></p>
 </div>
 {% endif %}

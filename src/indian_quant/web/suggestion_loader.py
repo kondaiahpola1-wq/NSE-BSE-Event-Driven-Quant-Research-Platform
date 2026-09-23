@@ -1,23 +1,27 @@
-"""Load suggestion data for web dashboard views."""
+"""Load suggestion data for web dashboard views.
+
+Uses PostgreSQL (PgMetadataStore) instead of SQLite.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from indian_quant.web import data_loader as dl
-
 
 def get_suggestion_summary() -> dict[str, Any]:
-    settings = dl._settings()
-    from indian_quant.storage import MetadataStore
-    md = MetadataStore(settings.storage.metadata_dsn)
-    s = md.suggestions_summary()
-    md.close()
-    return dl._sanitize(s)
+    """Get aggregated suggestion stats from PostgreSQL."""
+    from indian_quant.web.prod_config import get_pg_engine
+    from indian_quant.storage.pg_metadata import PgMetadataStore
+    pg = PgMetadataStore(get_pg_engine())
+    try:
+        s = pg.suggestions_summary()
+        return s
+    finally:
+        pg.close()
 
 
 def get_suggestion_loader():
-    """Return the MetadataStore-based suggestion functions."""
-    settings = dl._settings()
-    from indian_quant.storage import MetadataStore
-    return MetadataStore(settings.storage.metadata_dsn)
+    """Return the PgMetadataStore-based suggestion functions."""
+    from indian_quant.web.prod_config import get_pg_engine
+    from indian_quant.storage.pg_metadata import PgMetadataStore
+    return PgMetadataStore(get_pg_engine())

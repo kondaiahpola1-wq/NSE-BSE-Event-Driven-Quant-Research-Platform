@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Journal #{{ entry.id }} — {{ entry.symbol }}{% endblock %}
+{% block nav_journal %}active{% endblock %}
+{% block content %}
+<h1>Journal #{{ entry.id }} — {{ entry.symbol }}</h1>
+<a href="/journal" style="font-size:13px;color:var(--dim)">← Back to Journal</a>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px">
+  <!-- Entry Details -->
+  <div class="card">
+    <h2 style="margin-top:0;font-size:14px;color:var(--green)">Entry</h2>
+    <table style="margin-top:8px">
+      <tr><td style="color:var(--faint)">Date</td><td class="mono">{{ entry.entry_date or '?' }}</td></tr>
+      <tr><td style="color:var(--faint)">Price</td><td class="mono">₹{{ "%.2f"|format(entry.entry_price or 0) }}</td></tr>
+      <tr><td style="color:var(--faint)">Signal</td><td>{{ entry.entry_signal or '?' }}</td></tr>
+      <tr><td style="color:var(--faint)">Setup</td><td><span class="badge {% if entry.setup_type == 'delivery_momentum' %}badge-green{% elif entry.setup_type == 'circuit_breakout' %}badge-orange{% elif entry.setup_type == 'surveillance_recovery' %}badge-purple{% else %}badge-red{% endif %}">{{ entry.setup_type or '?' }}</span></td></tr>
+      <tr><td style="color:var(--faint)">Stop Loss</td><td class="mono">₹{{ "%.2f"|format(entry.stop_loss or 0) }}</td></tr>
+      <tr><td style="color:var(--faint)">Target</td><td class="mono">₹{{ "%.2f"|format(entry.target_price or 0) }}</td></tr>
+      <tr><td style="color:var(--faint)">Position</td><td>{{ entry.position_size or 0 }} shares (₹{{ "%.0f"|format((entry.position_size or 0) * (entry.entry_price or 0)) }})</td></tr>
+      <tr><td style="color:var(--faint)">Risk</td><td class="mono">₹{{ "%.0f"|format(entry.risk_amount or 0) }}</td></tr>
+      <tr><td style="color:var(--faint)">Conviction</td><td class="mono">{{ "%.3f"|format(entry.conviction or 0) }}</td></tr>
+      {% if entry.nifty_level %}
+      <tr><td style="color:var(--faint)">Nifty</td><td class="mono">{{ "%.0f"|format(entry.nifty_level) }}</td></tr>
+      {% endif %}
+      {% if entry.sector %}
+      <tr><td style="color:var(--faint)">Sector</td><td>{{ entry.sector }}</td></tr>
+      {% endif %}
+    </table>
+    {% if entry.entry_rationale %}
+    <div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:6px;font-size:13px">
+      <strong style="color:var(--faint)">Rationale:</strong> {{ entry.entry_rationale }}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Exit Details -->
+  <div class="card">
+    <h2 style="margin-top:0;font-size:14px;color:var(--blue)">Exit</h2>
+    {% if entry.exit_date %}
+    <table style="margin-top:8px">
+      <tr><td style="color:var(--faint)">Date</td><td class="mono">{{ entry.exit_date }}</td></tr>
+      <tr><td style="color:var(--faint)">Price</td><td class="mono">₹{{ "%.2f"|format(entry.exit_price or 0) }}</td></tr>
+      <tr><td style="color:var(--faint)">Reason</td><td><span class="badge {% if entry.exit_reason == 'STOP' %}badge-red{% elif entry.exit_reason == 'HORIZON' %}badge-orange{% else %}badge-green{% endif %}">{{ entry.exit_reason or '?' }}</span></td></tr>
+      <tr><td style="color:var(--faint)">Days Held</td><td>{{ entry.days_held or 0 }}</td></tr>
+      <tr><td style="color:var(--faint)">Return</td><td class="mono {% if (entry.return_pct or 0) > 0 %}good{% else %}bad{% endif %}">{{ "%.1f"|format(entry.return_pct or 0) }}%</td></tr>
+      <tr><td style="color:var(--faint)">Net (bps)</td><td class="mono {% if (entry.net_bps or 0) > 0 %}good{% else %}bad{% endif %}">{{ "%+.0f"|format(entry.net_bps or 0) }}</td></tr>
+      {% if entry.stop_moved %}
+      <tr><td style="color:var(--faint)">Stop Moved</td><td class="warn">Yes ({{ entry.stop_history|length }} adjustments)</td></tr>
+      {% endif %}
+    </table>
+    {% if entry.exit_rationale %}
+    <div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:6px;font-size:13px">
+      <strong style="color:var(--faint)">Rationale:</strong> {{ entry.exit_rationale }}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="empty" style="margin-top:20px">Trade still open — exit details will appear here after settlement.</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Post-Trade Review -->
+<div class="card" style="margin-top:16px">
+  <h2 style="margin-top:0;font-size:14px;color:var(--orange)">Post-Trade Review</h2>
+  {% if entry.review_date %}
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:12px">
+    <div>
+      <div style="color:var(--faint);font-size:12px;margin-bottom:4px">Rating</div>
+      <div class="score-badge {% if (entry.review_rating or 0) >= 4 %}score-top{% elif (entry.review_rating or 0) >= 3 %}score-mid{% else %}score-low{% endif %}" style="font-size:18px;padding:4px 12px">
+        {{ entry.review_rating }}/5
+      </div>
+    </div>
+    <div>
+      <div style="color:var(--faint);font-size:12px;margin-bottom:4px">Setup Grade</div>
+      <div class="mono" style="font-size:18px;font-weight:bold">{{ entry.setup_quality or '—' }}</div>
+    </div>
+    <div>
+      <div style="color:var(--faint);font-size:12px;margin-bottom:4px">Execution Grade</div>
+      <div class="mono" style="font-size:18px;font-weight:bold">{{ entry.execution_grade or '—' }}</div>
+    </div>
+  </div>
+
+  <div style="margin-top:16px">
+    {% if entry.what_went_right %}
+    <div style="margin-bottom:10px">
+      <div style="color:var(--green);font-size:12px;text-transform:uppercase;letter-spacing:1px">What Went Right</div>
+      <div style="margin-top:4px;font-size:13px;padding:8px;background:rgba(0,229,160,.06);border-radius:6px">{{ entry.what_went_right }}</div>
+    </div>
+    {% endif %}
+    {% if entry.what_went_wrong %}
+    <div style="margin-bottom:10px">
+      <div style="color:var(--red);font-size:12px;text-transform:uppercase;letter-spacing:1px">What Went Wrong</div>
+      <div style="margin-top:4px;font-size:13px;padding:8px;background:rgba(255,107,129,.06);border-radius:6px">{{ entry.what_went_wrong }}</div>
+    </div>
+    {% endif %}
+    {% if entry.lessons_learned %}
+    <div style="margin-bottom:10px">
+      <div style="color:var(--orange);font-size:12px;text-transform:uppercase;letter-spacing:1px">Lessons Learned</div>
+      <div style="margin-top:4px;font-size:13px;padding:8px;background:rgba(255,180,84,.06);border-radius:6px">{{ entry.lessons_learned }}</div>
+    </div>
+    {% endif %}
+    <div>
+      <span style="color:var(--faint);font-size:12px">Would repeat?</span>
+      {% if entry.would_repeat == true %}
+        <span class="badge badge-green">Yes</span>
+      {% elif entry.would_repeat == false %}
+        <span class="badge badge-red">No</span>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if entry.notes %}
+  <div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:6px;font-size:13px">
+    <strong style="color:var(--faint)">Notes:</strong> {{ entry.notes }}
+  </div>
+  {% endif %}
+
+  {% else %}
+  <!-- Review Form -->
+  <form method="POST" action="/api/journal/{{ entry.id }}/review" style="margin-top:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div>
+        <label style="color:var(--faint);font-size:12px;display:block;margin-bottom:4px">Rating (1-5)</label>
+        <select name="review_rating" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);color:var(--txt);border-radius:6px;font-family:var(--mono)">
+          <option value="1">1 — Poor</option>
+          <option value="2">2 — Below Avg</option>
+          <option value="3" selected>3 — Average</option>
+          <option value="4">4 — Good</option>
+          <option value="5">5 — Excellent</option>
+        </select>
+      </div>
+      <div>
+        <label style="color:var(--faint);font-size:12px;display:block;margin-bottom:4px">Setup Grade</label>
+        <select name="setup_quality" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);color:var(--txt);border-radius:6px;font-family:var(--mono)">
+          <option value="">—</option>
+          <option value="A">A — Textbook</option>
+          <option value="B">B — Good</option>
+          <option value="C">C — Marginal</option>
+          <option value="D">D — Bad</option>
+        </select>
+      </div>
+      <div>
+        <label style="color:var(--faint);font-size:12px;display:block;margin-bottom:4px">Execution Grade</label>
+        <select name="execution_grade" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);color:var(--txt);border-radius:6px;font-family:var(--mono)">
+          <option value="">—</option>
+          <option value="A">A — Perfect</option>
+          <option value="B">B — Good</option>
+          <option value="C">C — Slippage/late</option>
+          <option value="D">D — Chased/FOMO</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <label style="color:var(--faint);font-size:12px;display:block;margin-bottom:4px">What went right?</label>
+      <textarea name="what_went_right" rows="2" style="width:100%;padding:8px;background:var(--bg2);border:1px solid var(--line);color:var(--txt);border-radius:6px;font-size:13px" placeholder="Entry was well-timed, signal was strong..."></textarea>
+    </div>
+    <div style="margin-top:8px">
+      <label style="color:var(--faint);font-size:12px;display:block;margin-bottom:4px">What went wrong?</label>
+      <textarea name="what_went_wrong" rows="2" style="width:100%;padding:8px;background:var(--bg2);border:1px solid var(--line);color:var(--txt);border-radius:6px;font-size:13px" placeholder="Stop too tight, entered late, ignored sector weakness..."></textarea>
+    </div>
+    <div style="margin-top:8px">
+      <label style="color:var(--faint);font-size:12px;display:block;margin-bottom:4px">Lessons learned</label>
+      <textarea name="lessons_learned" rows="2" style="width:100%;padding:8px;background:var(--bg2);border:1px solid var(--line);color:var(--txt);border-radius:6px;font-size:13px" placeholder="Next time: wait for z>=3 before entering, check sector momentum..."></textarea>
+    </div>
+    <div style="margin-top:8px">
+      <label style="color:var(--faint);font-size:12px;display:block;margin-bottom:4px">Notes</label>
+      <textarea name="notes" rows="2" style="width:100%;padding:8px;background:var(--bg2);border:1px solid var(--line);color:var(--txt);border-radius:6px;font-size:13px" placeholder="Any additional notes..."></textarea>
+    </div>
+    <div style="margin-top:12px">
+      <label style="color:var(--faint);font-size:12px">
+        <input type="checkbox" name="would_repeat" value="true" checked> Would take this trade again
+      </label>
+    </div>
+    <button type="submit" style="margin-top:12px;padding:8px 20px;background:var(--green);color:var(--bg);border:none;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px">Save Review</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

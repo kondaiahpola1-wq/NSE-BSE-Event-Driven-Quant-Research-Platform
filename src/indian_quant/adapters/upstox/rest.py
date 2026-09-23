@@ -1,6 +1,9 @@
-"""Upstox REST client: Historical Candle Data V3 -> canonical MarketBar contracts.
+"""Upstox REST client: Historical Candle Data V3 + Market Quotes V2.
 
-Endpoint: GET /v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}
+Endpoints:
+  GET /v3/historical-candle/{instrument_key}/{unit}/{interval}/{to_date}/{from_date}
+  GET /v2/market-quote/quotes?instrument_key=...
+  GET /v2/market-quote/ltp?instrument_key=...
 Auth: Bearer access token. Instrument keys use the canonical Upstox format,
 e.g. ``NSE_EQ|INE002A01018`` - which is why our canonical ids were designed
 with the same EXCHANGE_SEGMENT|LOCAL_ID shape.
@@ -147,3 +150,37 @@ class UpstoxRestClient:
         return self.candles_to_bars(
             payload, instrument_id=instrument_id, exchange=exchange, timeframe=timeframe
         )
+
+    def get_quotes(self, instrument_keys: list[str]) -> dict[str, dict[str, Any]]:
+        """GET /v2/market-quote/quotes — full market quotes.
+
+        Returns dict keyed by symbol (e.g. 'NSE_EQ:NHPC') with last_price,
+        ohlc, volume, depth, circuit limits, etc. Supports up to 500 instruments.
+        """
+        keys_csv = ",".join(instrument_keys)
+        resp = httpx.get(
+            "https://api.upstox.com/v2/market-quote/quotes",
+            params={"instrument_key": keys_csv},
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("data") or {}
+
+    def get_ltp(self, instrument_keys: list[str]) -> dict[str, dict[str, Any]]:
+        """GET /v2/market-quote/ltp — lightweight LTP-only quotes.
+
+        Returns dict keyed by symbol with just last_price per instrument.
+        Faster than get_quotes when only LTP is needed.
+        """
+        keys_csv = ",".join(instrument_keys)
+        resp = httpx.get(
+            "https://api.upstox.com/v2/market-quote/ltp",
+            params={"instrument_key": keys_csv},
+            headers=self._headers(),
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("data") or {}

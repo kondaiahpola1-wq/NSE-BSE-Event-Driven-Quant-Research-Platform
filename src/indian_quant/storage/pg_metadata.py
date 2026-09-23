@@ -52,7 +52,8 @@ class PgMetadataStore:
                             horizon_label: str = "10d",
                             capital_allocated: float = 0.0,
                             conviction_score: float = 0.0,
-                            kelly_fraction: float = 0.0) -> int:
+                            kelly_fraction: float = 0.0,
+                            hypothesis_id: int | None = None) -> int:
         values = {
             "created_at": datetime.now(UTC).isoformat(),
             "symbol": symbol,
@@ -71,6 +72,7 @@ class PgMetadataStore:
             "conviction_score": conviction_score,
             "kelly_fraction": kelly_fraction,
             "note": note,
+            "hypothesis_id": hypothesis_id,
         }
         cols = ", ".join(values.keys())
         phs = ", ".join(f":{k}" for k in values)
@@ -303,3 +305,181 @@ class PgMetadataStore:
                 FROM daily_suggestions GROUP BY horizon_label
             """)).mappings().fetchall()
             return {r["horizon_label"]: _clean_row(dict(r)) for r in rows}
+
+    # ── Trade Journal ──
+
+    def journal_record_on_entry(self, *, paper_trade_id: int, symbol: str,
+                                 entry_date: str, entry_price: float,
+                                 entry_signal: str, setup_type: str = "delivery_momentum",
+                                 stop_loss: float = 0, target_price: float = 0,
+                                 position_size: int = 0, risk_amount: float = 0,
+                                 conviction: float = 0, sector: str = "",
+                                 nifty_level: float = 0, market_breadth: float = 0,
+                                 entry_rationale: str = "") -> int:
+        """Auto-record journal entry when a trade is opened."""
+        values = {
+            "paper_trade_id": paper_trade_id,
+            "symbol": symbol,
+            "entry_date": entry_date,
+            "entry_price": entry_price,
+            "entry_signal": entry_signal,
+            "entry_rationale": entry_rationale or f"Signal: {entry_signal}",
+            "setup_type": setup_type,
+            "stop_loss": stop_loss,
+            "target_price": target_price,
+            "position_size": position_size,
+            "risk_amount": risk_amount,
+            "conviction": conviction,
+            "sector": sector,
+            "nifty_level": nifty_level,
+            "market_breadth": market_breadth,
+        }
+        cols = ", ".join(values.keys())
+        phs = ", ".join(f":{k}" for k in values)
+        sql = sa.text(f"INSERT INTO trade_journal ({cols}) VALUES ({phs}) RETURNING id")
+        with self._engine.begin() as conn:
+            return conn.execute(sql, values).scalar()
+
+    def journal_record_on_exit(self, paper_trade_id: int, *,
+                                exit_date: str, exit_price: float,
+                                exit_reason: str = "", exit_rationale: str = "",
+                                days_held: int = 0, return_pct: float = 0,
+                                return_bps: float = 0, net_bps: float = 0) -> bool:
+        """Update journal entry when a trade is closed."""
+        with self._engine.begin() as conn:
+            r = conn.execute(sa.text("""
+                UPDATE trade_journal SET
+                    exit_date = :exit_date, exit_price = :exit_price,
+                    exit_reason = :exit_reason, exit_rationale = :exit_rationale,
+                    days_held = :days_held, return_pct = :return_pct,
+                    return_bps = :return_bps, net_bps = :net_bps
+                WHERE paper_trade_id = :pid
+            """), {
+                "pid": paper_trade_id,
+                "exit_date": exit_date, "exit_price": exit_price,
+                "exit_reason": exit_reason, "exit_rationale": exit_rationale,
+                "days_held": days_held, "return_pct": return_pct,
+                "return_bps": return_bps, "net_bps": net_bps,
+            })
+            return r.rowcount > 0
+
+    def journal_add_review(self, paper_trade_id: int, *,
+                            review_rating: int = 0,
+                            what_went_right: str = "",
+                            what_went_wrong: str = "",
+                            lessons_learned: str = "",
+                            would_repeat: bool = True,
+                            setup_quality: str = "",
+                            execution_grade: str = "",
+                            notes: str = "") -> bool:
+        """Add post-trade review to journal."""
+        from datetime import date as _date
+        with self._engine.begin() as conn:
+            r = conn.execute(sa.text("""
+                UPDATE trade_journal SET
+                    review_date = :rd, review_rating = :rr,
+                    what_went_right = :wwr, what_went_wrong = :www,
+                    lessons_learned = :ll, would_repeat = :wr,
+                    setup_quality = :sq, execution_grade = :eg,
+                    notes = :notes
+                WHERE paper_trade_id = :pid
+            """), {
+                "pid": paper_trade_id,
+                "rd": _date.today().isoformat(), "rr": review_rating,
+                "wwr": what_went_right, "www": what_went_wrong,
+                "ll": lessons_learned, "wr": would_repeat,
+                "sq": setup_quality, "eg": execution_grade,
+                "notes": notes,
+            })
+            return r.rowcount > 0
+
+    def journal_update_stop(self, paper_trade_id: int, *,
+                             date: str, old_stop: float, new_stop: float,
+                             reason: str = "") -> bool:
+        """Record stop loss adjustment."""
+        import json
+        with self._engine.connect() as conn:
+            row = conn.execute(sa.text(
+                "SELECT stop_history FROM trade_journal WHERE paper_trade_id = :pid"
+            ), {"pid": paper_trade_id}).fetchone()
+            if not row:
+                return False
+            history = json.loads(row[0] or "[]") if row[0] else []
+            history.append({"date": date, "old": old_stop, "new": new_stop, "reason": reason})
+            conn.execute(sa.text("""
+                UPDATE trade_journal SET stop_moved = TRUE, stop_history = :sh
+                WHERE paper_trade_id = :pid
+            """), {"pid": paper_trade_id, "sh": json.dumps(history)})
+            conn.commit()
+            return True
+
+    def journal_entry(self, paper_trade_id: int) -> dict | None:
+        """Get full journal entry for a trade."""
+        with self._engine.connect() as conn:
+            r = conn.execute(sa.text(
+                "SELECT * FROM trade_journal WHERE paper_trade_id = :pid"
+            ), {"pid": paper_trade_id}).mappings().fetchone()
+            return _clean_row(dict(r)) if r else None
+
+    def journal_list(self, *, setup_type: str = "", reviewed: bool | None = None,
+                      limit: int = 50) -> list[dict]:
+        """List journal entries with optional filters."""
+        conditions = []
+        params = {}
+        if setup_type:
+            conditions.append("setup_type = :st")
+            params["st"] = setup_type
+        if reviewed is True:
+            conditions.append("review_date IS NOT NULL")
+        elif reviewed is False:
+            conditions.append("review_date IS NULL")
+        where = "WHERE " + " AND ".join(conditions) if conditions else ""
+        params["limit"] = limit
+
+        with self._engine.connect() as conn:
+            rows = conn.execute(sa.text(
+                f"SELECT * FROM trade_journal {where} ORDER BY entry_date DESC LIMIT :limit"
+            ), params).mappings().fetchall()
+            return [_clean_row(dict(r)) for r in rows]
+
+    def journal_stats(self) -> dict:
+        """Aggregate stats from journal: win/loss by setup, avg rating, review coverage."""
+        with self._engine.connect() as conn:
+            r = conn.execute(sa.text("""
+                SELECT
+                    COUNT(*) as total_trades,
+                    SUM(CASE WHEN net_bps > 0 THEN 1 ELSE 0 END) as winners,
+                    SUM(CASE WHEN net_bps <= 0 THEN 1 ELSE 0 END) as losers,
+                    AVG(net_bps) as avg_net_bps,
+                    AVG(return_bps) as avg_return_bps,
+                    AVG(review_rating) as avg_rating,
+                    SUM(CASE WHEN review_date IS NOT NULL THEN 1 ELSE 0 END) as reviewed,
+                    SUM(CASE WHEN would_repeat = TRUE THEN 1 ELSE 0 END) as would_repeat_count,
+                    SUM(CASE WHEN would_repeat = FALSE THEN 1 ELSE 0 END) as would_not_repeat
+                FROM trade_journal
+            """)).mappings().fetchone()
+            base = _clean_row(dict(r)) if r else {}
+
+            # By setup type
+            rows = conn.execute(sa.text("""
+                SELECT
+                    setup_type,
+                    COUNT(*) as n,
+                    AVG(net_bps) as avg_net_bps,
+                    AVG(review_rating) as avg_rating,
+                    SUM(CASE WHEN net_bps > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as win_rate
+                FROM trade_journal
+                GROUP BY setup_type ORDER BY n DESC
+            """)).mappings().fetchall()
+            base["by_setup"] = [_clean_row(dict(r)) for r in rows]
+
+            # Top lessons
+            rows = conn.execute(sa.text("""
+                SELECT lessons_learned, symbol, net_bps, setup_type
+                FROM trade_journal
+                WHERE lessons_learned IS NOT NULL AND lessons_learned != ''
+                ORDER BY entry_date DESC LIMIT 10
+            """)).mappings().fetchall()
+            base["recent_lessons"] = [_clean_row(dict(r)) for r in rows]
+
+            return base

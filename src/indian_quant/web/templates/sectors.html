@@ -49,18 +49,24 @@ async function loadSectors() {
 
     // Performance table
     const daily = data.daily || [];
+    const sectorMap = {};
+    sectors.forEach(s => { sectorMap[s.sector] = s; });
     const tbody = document.getElementById('sectorBody');
     if (daily.length > 0) {
       tbody.innerHTML = daily.map(d => {
         const retClass = (d.avg_return || 0) > 0 ? 'good' : (d.avg_return || 0) < 0 ? 'bad' : '';
+        const info = sectorMap[d.sector] || {};
+        const pe = info.avg_pe ? info.avg_pe.toFixed(1) : '--';
+        const roe = info.avg_roe ? info.avg_roe.toFixed(1) + '%' : '--';
+        const de = info.avg_de ? info.avg_de.toFixed(2) : '--';
         return `<tr>
           <td><strong>${d.sector || 'Unknown'}</strong></td>
           <td>${d.stock_count || 0}</td>
           <td class="${retClass}">${((d.avg_return || 0) * 100).toFixed(2)}%</td>
           <td>${(d.avg_deliv_z || 0).toFixed(2)}</td>
-          <td>--</td>
-          <td>--</td>
-          <td>--</td>
+          <td>${pe}</td>
+          <td>${roe}</td>
+          <td>${de}</td>
         </tr>`;
       }).join('');
     } else {

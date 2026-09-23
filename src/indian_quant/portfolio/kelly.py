@@ -61,3 +61,35 @@ DEFAULT_WIN_RATE = 0.43
 DEFAULT_AVG_WIN_BPS = 250.0
 DEFAULT_AVG_LOSS_BPS = 165.0
 DEFAULT_KELLY_FRAC = 0.5
+
+
+def dynamic_kelly_params(engine) -> tuple[float, float, float]:
+    """Compute Kelly parameters from actual settled paper trades.
+
+    Returns (win_rate, avg_win_bps, avg_loss_bps).
+    Falls back to defaults if fewer than 20 settled trades.
+    """
+    import sqlalchemy as sa
+
+    try:
+        with engine.connect() as conn:
+            r = conn.execute(sa.text("""
+                SELECT
+                    COUNT(*) as n,
+                    AVG(CASE WHEN realized_net_bps > 0 THEN realized_net_bps END) as avg_win,
+                    AVG(CASE WHEN realized_net_bps <= 0 THEN ABS(realized_net_bps) END) as avg_loss,
+                    SUM(CASE WHEN realized_net_bps > 0 THEN 1 ELSE 0 END)::float /
+                        NULLIF(COUNT(*), 0) as win_rate
+                FROM paper_signals
+                WHERE status = 'SETTLED' AND realized_net_bps IS NOT NULL
+            """)).mappings().fetchone()
+        n = r["n"] or 0
+        if n < 20 or not r["win_rate"]:
+            return DEFAULT_WIN_RATE, DEFAULT_AVG_WIN_BPS, DEFAULT_AVG_LOSS_BPS
+        return (
+            float(r["win_rate"]),
+            float(r["avg_win"] or DEFAULT_AVG_WIN_BPS),
+            float(r["avg_loss"] or DEFAULT_AVG_LOSS_BPS),
+        )
+    except Exception:
+        return DEFAULT_WIN_RATE, DEFAULT_AVG_WIN_BPS, DEFAULT_AVG_LOSS_BPS

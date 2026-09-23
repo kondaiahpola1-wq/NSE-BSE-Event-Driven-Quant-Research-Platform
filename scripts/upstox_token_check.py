@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Quick Upstox token health check.
+
+Shows: validity, expiry time, remaining hours, user info.
+
+Usage:
+  python scripts/upstox_token_check.py
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+TOKEN_FILE = ROOT / "upstox_tokens.json"
+
+
+def main() -> int:
+    if not TOKEN_FILE.exists():
+        print("ERROR: upstox_tokens.json not found")
+        return 1
+
+    data = json.loads(TOKEN_FILE.read_text())
+    access_token = data.get("access_token", "")
+    extended_token = data.get("extended_token", "")
+
+    if not access_token:
+        print("ERROR: No access_token in file")
+        return 1
+
+    # Decode access token JWT
+    now = time.time()
+    print(f"User:      {data.get('user_name', 'N/A')} ({data.get('user_id', 'N/A')})")
+    print(f"Email:     {data.get('email', 'N/A')}")
+    print(f"Broker:    {data.get('broker', 'N/A')}")
+    print()
+
+    try:
+        parts = access_token.split(".")
+        payload = parts[1] + "=" * (4 - len(parts[1]) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(payload))
+        exp = decoded.get("exp", 0)
+        iat = decoded.get("iat", 0)
+        remaining_h = (exp - now) / 3600
+        remaining_m = remaining_h * 60
+
+        print(f"Access Token:")
+        print(f"  Issued:    {datetime.fromtimestamp(iat, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+        print(f"  Expires:   {datetime.fromtimestamp(exp, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+        if remaining_h > 0:
+            print(f"  Remaining: {remaining_h:.1f}h ({remaining_m:.0f} min)")
+            print(f"  Status:    VALID")
+        else:
+            print(f"  Remaining: EXPIRED {-remaining_h:.1f}h ago")
+            print(f"  Status:    EXPIRED")
+    except Exception as e:
+        print(f"  JWT decode error: {e}")
+
+    print()
+
+    # Decode extended token
+    if extended_token:
+        try:
+            parts = extended_token.split(".")
+            payload = parts[1] + "=" * (4 - len(parts[1]) % 4)
+            decoded = json.loads(base64.urlsafe_b64decode(payload))
+            exp = decoded.get("exp", 0)
+            remaining_d = (exp - now) / 86400
+
+            print(f"Extended Token:")
+            print(f"  Expires:   {datetime.fromtimestamp(exp, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+            print(f"  Remaining: {remaining_d:.0f} days")
+            if remaining_d > 30:
+                print(f"  Status:    OK")
+            elif remaining_d > 0:
+                print(f"  Status:    WARNING — expiring soon")
+            else:
+                print(f"  Status:    EXPIRED — need full re-login")
+        except Exception as e:
+            print(f"  JWT decode error: {e}")
+    else:
+        print("Extended Token: NONE")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

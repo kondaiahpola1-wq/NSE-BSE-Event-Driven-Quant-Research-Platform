@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block title %}Backtest Analytics{% endblock %}
+{% block content %}
+<h1 style="margin-bottom:24px">Backtest Analytics</h1>
+
+{% if not data %}
+<div class="card" style="text-align:center;padding:60px 20px">
+  <div style="font-size:48px;margin-bottom:16px">📊</div>
+  <h2>No backtest data yet</h2>
+  <p style="color:var(--faint);margin-top:8px">Run <code>python scripts/cluster_backtest.py</code> to generate backtest results</p>
+</div>
+{% else %}
+
+{% set s = data.summary %}
+
+{# ── Summary Cards ── #}
+<div class="grid grid-4" style="margin-bottom:20px">
+  <div class="card" style="border-left:3px solid {% if s.net_expectancy_bps > 0 %}var(--green){% else %}var(--red){% endif %}">
+    <div class="label">Net Expectancy</div>
+    <div class="value {% if s.net_expectancy_bps > 0 %}good{% else %}bad{% endif %}" style="font-size:28px">{{ s.net_expectancy_bps }} bps</div>
+    <div class="sub">avg per trade (after costs)</div>
+  </div>
+  <div class="card" style="border-left:3px solid {% if s.win_rate > 0.5 %}var(--green){% elif s.win_rate > 0.4 %}var(--blue){% else %}var(--red){% endif %}">
+    <div class="label">Win Rate</div>
+    <div class="value {% if s.win_rate > 0.5 %}good{% elif s.win_rate > 0.4 %}neutral{% else %}bad{% endif %}" style="font-size:28px">{{ (s.win_rate * 100)|round(1) }}%</div>
+    <div class="sub">{{ s.n_trades }} trades total</div>
+  </div>
+  <div class="card" style="border-left:3px solid var(--red)">
+    <div class="label">Max Drawdown</div>
+    <div class="value bad" style="font-size:28px">{{ s.max_drawdown_pct }}%</div>
+    <div class="sub">peak-to-trough</div>
+  </div>
+  <div class="card" style="border-left:3px solid var(--blue)">
+    <div class="label">Final Equity</div>
+    <div class="value" style="font-size:22px">₹{{ "{:,.0f}".format(s.final_equity) }}</div>
+    <div class="sub">from ₹10,00,000 start</div>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:24px">
+  <div class="card">
+    <div class="label">Total Return</div>
+    <div class="value {% if s.final_equity > 1000000 %}good{% else %}bad{% endif %}" style="font-size:22px">
+      {{ ((s.final_equity / 1000000 - 1) * 100)|round(2) }}%
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Avg Holding</div>
+    <div class="value" style="font-size:22px">{{ s.avg_holding_days }} days</div>
+  </div>
+  <div class="card">
+    <div class="label">Winners</div>
+    <div class="value good" style="font-size:22px">{{ (s.win_rate * s.n_trades)|int }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Losers</div>
+    <div class="value bad" style="font-size:22px">{{ s.n_trades - (s.win_rate * s.n_trades)|int }}</div>
+  </div>
+</div>
+
+{# ── Equity Curve ── #}
+<div class="card" style="margin-bottom:24px">
+  <div class="label">Equity Curve</div>
+  <div class="chart-container" style="height:300px"><canvas id="equityChart"></canvas></div>
+</div>
+
+{# ── Per-Signal Backtest Metrics (hypothesis-wise) ── #}
+{% if data.by_signal %}
+<div class="card" style="margin-bottom:24px">
+  <div class="label">Backtest by Signal (hypothesis-wise)</div>
+  <table>
+    <tr><th>Signal</th><th>Maps To</th><th>Trades</th><th>Net Exp (bps)</th><th>Win Rate</th><th>Profit Factor</th><th>MaxDD %</th><th>Sharpe</th></tr>
+    {% for sig, m in data.by_signal.items() %}
+    <tr>
+      <td class="mono"><strong>{{ sig }}</strong></td>
+      <td style="font-size:12px">{% if sig == 'dz_hi_up' %}delivery_momentum{% elif sig == 'dz_hi_dn' %}delivery (short-side){% elif sig == 'dz_lo_up' %}delivery (washout){% elif sig == 'spike_70' %}delivery (spike){% elif sig == 'streak3' %}delivery (streak){% else %}research{% endif %}{% if m.error %} <span class="badge badge-red">error</span>{% endif %}</td>
+      <td class="mono">{{ m.n_trades|default('—') }}</td>
+      <td class="mono {% if m.net_expectancy_bps and m.net_expectancy_bps > 0 %}good{% elif m.net_expectancy_bps %}bad{% endif %}">{{ (m.net_expectancy_bps|round(1)) if m.net_expectancy_bps is not none else '—' }}</td>
+      <td class="mono">{{ ((m.win_rate * 100)|round(1)) if m.win_rate is not none else '—' }}%</td>
+      <td class="mono">{{ (m.profit_factor|round(2)) if m.profit_factor is not none else '—' }}</td>
+      <td class="mono">{{ (m.max_drawdown_pct|round(2)) if m.max_drawdown_pct is not none else '—' }}</td>
+      <td class="mono">{{ (m.sharpe_ratio|round(3)) if m.sharpe_ratio is not none else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="sub">Note: circuit_breakout / surveillance_recovery / announcement_alpha have no portfolio-backtest engine support (they need live circuit limits, surveillance exits, announcement feeds) — their validation is live paper trading below.</div>
+</div>
+{% endif %}
+
+{# ── Live Paper Performance by Hypothesis ── #}
+{% if hypo_perf %}
+<div class="card" style="margin-bottom:24px">
+  <div class="label">Live Paper by Hypothesis (synced with /positions)</div>
+  <table>
+    <tr><th>#</th><th>Hypothesis</th><th>Open</th><th>Settled</th><th>Avg Conviction</th><th>Open Value ₹</th></tr>
+    {% for h in hypo_perf %}
+    <tr>
+      <td class="mono">{{ h.id }}</td>
+      <td><strong>{{ h.name }}</strong></td>
+      <td class="mono">{{ h.open_n|default(0) }} / 7</td>
+      <td class="mono">{{ h.settled_n|default(0) }}</td>
+      <td class="mono">{{ ((h.avg_conv * 100)|round(1)) if h.avg_conv else '—' }}%</td>
+      <td class="mono">₹{{ "{:,.0f}".format(h.open_value|default(0, true)) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{# ── Exit Reasons + Config ── #}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px">
+  <div class="card">
+    <div class="label">Exit Reasons</div>
+    <table>
+      <tr><th>Reason</th><th>Count</th><th>% of Total</th></tr>
+      {% for reason, count in s.exit_reasons.items() %}
+      <tr>
+        <td><span class="badge {% if reason == 'STOP' %}badge-red{% elif reason == 'HORIZON' %}badge-green{% else %}badge-blue{% endif %}">{{ reason }}</span></td>
+        <td class="mono">{{ count }}</td>
+        <td class="mono">{{ ((count / s.n_trades * 100)|round(1)) }}%</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <div class="label">Strategy Config</div>
+    <table>
+      <tr><td>Signal</td><td class="mono">{{ data.config.signal|default('dz_hi_up') }}</td></tr>
+      <tr><td>Hold Days</td><td class="mono">{{ data.config.hold_days|default(10) }}</td></tr>
+      <tr><td>Stop Loss</td><td class="mono">{{ ((data.config.stop_pct|default(0.07)) * 100)|round }}%</td></tr>
+      <tr><td>Max Positions</td><td class="mono">{{ data.config.max_positions|default(8) }}</td></tr>
+      <tr><td>Capital</td><td class="mono">₹{{ "{:,.0f}".format(data.config.capital|default(25000)) }}</td></tr>
+      <tr><td>Risk Per Trade</td><td class="mono">{{ data.config.risk_pct|default(1) }}%</td></tr>
+      <tr><td>Price Range</td><td class="mono">₹{{ data.config.price_min|default(20) }}–₹{{ data.config.price_max|default(100) }}</td></tr>
+      <tr><td>Z-Score Min</td><td class="mono">{{ data.config.z_min|default(2.0) }}</td></tr>
+      <tr><td>Cluster Entries</td><td class="mono">{{ 'Yes' if data.config.cluster_entries|default(true) else 'No' }}</td></tr>
+      <tr><td>Kelly Sizing</td><td class="mono">{{ 'Yes' if data.config.use_kelly|default(false) else 'No' }}</td></tr>
+    </table>
+  </div>
+</div>
+
+{# ── Trade Log ── #}
+<div class="card" style="margin-bottom:24px">
+  <div class="label">Trade Log ({{ data.trades|length }} trades)</div>
+  <div style="max-height:500px;overflow-y:auto">
+  <table>
+    <tr><th>#</th><th>Symbol</th><th>Entry</th><th>Entry ₹</th><th>Exit</th><th>Exit ₹</th><th>Qty</th><th>Gross</th><th>Net</th><th>Reason</th><th>Days</th></tr>
+    {% for t in data.trades %}
+    <tr>
+      <td class="mono" style="font-size:11px;color:var(--faint)">{{ loop.index }}</td>
+      <td><strong>{{ t.symbol }}</strong></td>
+      <td style="font-size:12px">{{ t.entry[:10] }}</td>
+      <td class="mono">₹{{ '%.2f'|format(t.entry_px) }}</td>
+      <td style="font-size:12px">{{ t.exit[:10] }}</td>
+      <td class="mono">₹{{ '%.2f'|format(t.exit_px) }}</td>
+      <td class="mono">{{ t.qty }}</td>
+      <td class="mono {% if t.gross_bps > 0 %}good{% else %}bad{% endif %}">{{ '%.1f'|format(t.gross_bps) }}</td>
+      <td class="mono {% if t.net_bps > 0 %}good{% else %}bad{% endif %}">{{ '%.1f'|format(t.net_bps) }}</td>
+      <td><span class="badge {% if t.reason == 'STOP' %}badge-red{% elif t.reason == 'HORIZON' %}badge-green{% else %}badge-blue{% endif %}">{{ t.reason }}</span></td>
+      <td class="mono">{{ t.days_held }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+</div>
+
+{# ── Backtest vs Paper Comparison ── #}
+<div class="card" style="margin-bottom:24px">
+  <div class="label">Backtest vs Paper Trading</div>
+  <table>
+    <tr><th>Metric</th><th>Backtest</th><th>Paper Trading</th><th>Difference</th></tr>
+    <tr>
+      <td>Win Rate</td>
+      <td class="mono">{{ (s.win_rate * 100)|round(1) }}%</td>
+      <td class="mono">{% if paper.win_rate %}{{ paper.win_rate }}%{% else %}—{% endif %}</td>
+      <td class="mono">{% if paper.win_rate %}{% if paper.win_rate > s.win_rate * 100 %}good{% else %}bad{% endif %}{{ ((paper.win_rate - s.win_rate * 100)|round(1)) }}%{% else %}—{% endif %}</td>
+    </tr>
+    <tr>
+      <td>Avg Net BPS</td>
+      <td class="mono">{{ s.net_expectancy_bps }}</td>
+      <td class="mono">{% if paper.avg_net_bps %}{{ paper.avg_net_bps }}{% else %}—{% endif %}</td>
+      <td class="mono">{% if paper.avg_net_bps %}{% if paper.avg_net_bps > s.net_expectancy_bps %}good{% else %}bad{% endif %}{{ ((paper.avg_net_bps - s.net_expectancy_bps)|round(1)) }}{% else %}—{% endif %}</td>
+    </tr>
+    <tr>
+      <td>Trades</td>
+      <td class="mono">{{ s.n_trades }}</td>
+      <td class="mono">{{ paper.settled|default(0) }}</td>
+      <td class="mono" style="color:var(--faint)">—</td>
+    </tr>
+  </table>
+</div>
+
+<script>
+// Equity Curve
+const eqDates = {{ data.equity_dates|safe }};
+const eqValues = {{ data.equity_values|safe }};
+
+new Chart(document.getElementById('equityChart'), {
+  type: 'line',
+  data: {
+    labels: eqDates,
+    datasets: [{
+      label: 'Equity (₹)',
+      data: eqValues,
+      borderColor: '#4da3ff',
+      backgroundColor: 'rgba(77,163,255,.1)',
+      fill: true,
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {legend: {display: false}},
+    scales: {
+      x: {ticks: {color: '#4a5d80', maxTicksLimit: 12, font: {size: 10}}, grid: {color: 'rgba(28,42,66,.4)'}},
+      y: {ticks: {color: '#4a5d80', font: {size: 10}, callback: v => '₹' + (v/100000).toFixed(1) + 'L'}, grid: {color: 'rgba(28,42,66,.4)'}}
+    }
+  }
+});
+</script>
+
+{% endif %}
+{% endblock %}

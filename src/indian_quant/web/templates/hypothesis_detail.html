@@ -1,0 +1,581 @@
+{% extends "base.html" %}
+{% block title %}{{ hypo.name | replace('_', ' ') | title }}{% endblock %}
+{% block nav_hypotheses %}active{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div style="display:flex;align-items:center;gap:16px;margin-bottom:6px">
+    <a href="/hypotheses" style="color:var(--dim);font-size:13px">&larr; All Hypotheses</a>
+    <h1 style="margin:0">{{ hypo.name | replace('_', ' ') | title }}</h1>
+    {% if hypo.is_active %}
+    <span class="badge badge-green">ACTIVE</span>
+    {% else %}
+    <span class="badge badge-red">INACTIVE</span>
+    {% endif %}
+  </div>
+  <p style="color:var(--dim);margin-bottom:20px;font-size:13px">{{ hypo.description }}</p>
+
+  <!-- Summary Cards (always visible) -->
+  {% set ts = trade_summary %}
+  <div class="grid grid-4" style="margin-bottom:20px">
+    <div class="card">
+      <div class="label">Total Trades</div>
+      <div class="value">{{ ts.total or 0 }}</div>
+      <div class="sub">{{ ts.open or 0 }} open / {{ ts.settled or 0 }} settled</div>
+    </div>
+    <div class="card">
+      <div class="label">Avg Net BPS</div>
+      {% if ts.avg_net_bps is not none %}
+      <div class="value" style="color:{% if ts.avg_net_bps > 0 %}var(--green){% else %}var(--red){% endif %}">{{ "%.1f" | format(ts.avg_net_bps) }}</div>
+      {% else %}
+      <div class="value" style="color:var(--faint)">--</div>
+      {% endif %}
+      <div class="sub">after 214 bps costs</div>
+    </div>
+    <div class="card">
+      <div class="label">Win Rate</div>
+      <div class="value">{{ "%.0f" | format(ts.win_rate or 0) }}%</div>
+      <div class="sub">{{ ts.wins or 0 }} / {{ ts.settled or 0 }} settled</div>
+    </div>
+    <div class="card">
+      <div class="label">Total PnL</div>
+      {% if ts.total_pnl is not none %}
+      <div class="value" style="color:{% if ts.total_pnl > 0 %}var(--green){% else %}var(--red){% endif %}">₹{{ "%.0f" | format(ts.total_pnl) }}</div>
+      {% else %}
+      <div class="value" style="color:var(--faint)">--</div>
+      {% endif %}
+      <div class="sub">₹{{ "%.0f" | format(ts.capital_deployed or 0) }} deployed</div>
+    </div>
+  </div>
+
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:4px;margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:0">
+    <button class="tab-btn active" onclick="showTab('overview', this)">Overview</button>
+    <button class="tab-btn" onclick="showTab('trades', this)">Trades ({{ ts.total or 0 }})</button>
+    <button class="tab-btn" onclick="showTab('signals', this)">Signals ({{ latest_signals | length }})</button>
+    <button class="tab-btn" onclick="showTab('stocks', this)">Stocks ({{ stocks | length }})</button>
+    {% if hypo.name == 'surveillance_recovery' %}
+    <button class="tab-btn" onclick="showTab('surveillance', this)">Surveillance Data</button>
+    {% endif %}
+    {% if hypo.name == 'circuit_breakout' %}
+    <button class="tab-btn" onclick="showTab('circuit', this)">Circuit Data</button>
+    {% endif %}
+  </div>
+
+  <!-- TAB: Overview -->
+  <div id="tab-overview" class="tab-content">
+    {% if equity_dates %}
+    <div class="section-title">Equity Curve (Cumulative PnL)</div>
+    <div class="card" style="margin-bottom:24px">
+      <div class="chart-container" style="height:250px">
+        <canvas id="equityChart"></canvas>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Manual Trade Entry -->
+    <div class="section-title">Manual Trade Entry</div>
+    <div class="card" style="max-width:600px;margin-bottom:24px">
+      <form id="openForm" onsubmit="return openTrade(event)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="font-size:11px;color:var(--faint)">Symbol</label><br>
+            <input name="symbol" required placeholder="RELIANCE" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:13px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--faint)">Entry Price</label><br>
+            <input name="entry_price" type="number" step="0.01" required placeholder="250.00" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:13px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--faint)">Quantity</label><br>
+            <input name="qty" type="number" required placeholder="10" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:13px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--faint)">Stop %</label><br>
+            <input name="stop_pct" type="number" step="0.01" value="0.07" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:13px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--faint)">Horizon (days)</label><br>
+            <input name="horizon_days" type="number" value="10" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:13px">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--faint)">Notes</label><br>
+            <input name="notes" placeholder="optional" style="width:100%;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-size:13px">
+          </div>
+        </div>
+        <button type="submit" style="margin-top:14px;padding:8px 20px;border-radius:6px;border:1px solid var(--green);background:rgba(0,229,160,.1);color:var(--green);cursor:pointer;font-size:13px;font-weight:600">
+          Open Trade
+        </button>
+        <span id="openMsg" style="margin-left:12px;font-size:12px"></span>
+      </form>
+    </div>
+  </div>
+
+  <!-- TAB: Trades -->
+  <div id="tab-trades" class="tab-content" style="display:none">
+    <!-- Open Trades -->
+    <div class="section-title">Open Trades ({{ open_trades | length }})</div>
+    {% if open_trades %}
+    <table>
+      <tr>
+        <th>Symbol</th><th>Entry Date</th><th>Entry ₹</th><th>Qty</th><th>Value</th>
+        <th>Stop %</th><th>Horizon</th><th>Action</th>
+      </tr>
+      {% for t in open_trades %}
+      <tr id="open-{{ t.id }}">
+        <td class="mono"><a href="/stock/{{ t.symbol }}">{{ t.symbol }}</a></td>
+        <td>{{ t.entry_date }}</td>
+        <td class="mono">₹{{ "%.2f" | format(t.entry_price) }}</td>
+        <td class="mono">{{ t.qty }}</td>
+        <td class="mono">₹{{ "%.0f" | format(t.entry_value) }}</td>
+        <td>{{ "%.0f" | format((t.stop_pct or 0.07) * 100) }}%</td>
+        <td>{{ t.horizon_days }}d</td>
+        <td>
+          <button onclick="closeTrade({{ t.id }}, '{{ t.symbol }}', {{ t.entry_price }})"
+                  style="padding:3px 10px;border-radius:6px;border:1px solid var(--red);background:rgba(255,107,129,.1);color:var(--red);cursor:pointer;font-size:12px">
+            Close
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">No open trades</div>
+    {% endif %}
+
+    <!-- Settled Trades -->
+    {% if settled_trades %}
+    <div class="section-title">Settled Trades ({{ settled_trades | length }})</div>
+    <table>
+      <tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>Days</th><th>Gross bps</th><th>Net bps</th><th>Reason</th></tr>
+      {% for t in settled_trades %}
+      <tr>
+        <td class="mono">{{ t.symbol }}</td>
+        <td class="mono">₹{{ "%.2f" | format(t.entry_price) }}</td>
+        <td class="mono">₹{{ "%.2f" | format(t.exit_price or 0) }}</td>
+        <td>{{ t.days_held }}</td>
+        <td class="mono" style="color:{% if (t.gross_bps or 0) > 0 %}var(--green){% else %}var(--red){% endif %}">
+          {{ "%.1f" | format(t.gross_bps or 0) }}
+        </td>
+        <td class="mono" style="color:{% if (t.net_bps or 0) > 0 %}var(--green){% else %}var(--red){% endif %}">
+          {{ "%.1f" | format(t.net_bps or 0) }}
+        </td>
+        <td><span class="badge {% if t.exit_reason == 'TARGET' %}badge-green{% elif t.exit_reason == 'STOP' %}badge-red{% else %}badge-orange{% endif %}">{{ t.exit_reason }}</span></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty" style="margin-top:16px">No settled trades yet</div>
+    {% endif %}
+  </div>
+
+  <!-- TAB: Signals -->
+  <div id="tab-signals" class="tab-content" style="display:none">
+    <div class="section-title">Recent Signals (top {{ latest_signals | length }})</div>
+    {% if latest_signals %}
+    <table>
+      <tr><th>Date</th><th>Symbol</th><th>Type</th><th>Strength</th><th>Entry ₹</th><th>Stop ₹</th><th>Target ₹</th><th>Z</th><th>RSI</th></tr>
+      {% for sig in latest_signals %}
+      <tr>
+        <td>{{ sig.signal_date }}</td>
+        <td class="mono"><a href="/stock/{{ sig.symbol }}">{{ sig.symbol }}</a></td>
+        <td><span class="badge badge-green">{{ sig.signal_type }}</span></td>
+        <td class="mono">{{ "%.1f" | format(sig.strength) }}</td>
+        <td class="mono">₹{{ "%.2f" | format(sig.entry_price) }}</td>
+        <td class="mono" style="color:var(--red)">₹{{ "%.2f" | format(sig.stop_loss) }}</td>
+        <td class="mono" style="color:var(--green)">₹{{ "%.2f" | format(sig.target_price) }}</td>
+        <td class="mono">{{ "%.1f" | format(sig.deliv_z or 0) }}</td>
+        <td class="mono">{{ "%.0f" | format(sig.rsi or 0) }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">No signals yet — run hypothesis_signals.py to generate</div>
+    {% endif %}
+  </div>
+
+  <!-- TAB: Stocks -->
+  <div id="tab-stocks" class="tab-content" style="display:none">
+    <div class="section-title">Tracked Stocks ({{ stocks | length }})</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px">
+      <form id="addStockForm" onsubmit="return addStock(event)" style="display:flex;gap:8px;align-items:center">
+        <input name="symbol" required placeholder="Add symbol..." style="padding:6px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:13px;width:180px">
+        <button type="submit" style="padding:6px 14px;border-radius:6px;border:1px solid var(--green);background:rgba(0,229,160,.1);color:var(--green);cursor:pointer;font-size:12px">Add</button>
+        <span id="addMsg" style="font-size:12px"></span>
+      </form>
+    </div>
+    <div style="margin-bottom:10px">
+      <input id="stockSearch" type="text" placeholder="Search stocks..." onkeyup="filterStocks()"
+             style="width:100%;max-width:400px;padding:6px 10px;background:var(--bg2);border:1px solid var(--line);border-radius:6px;color:var(--txt);font-family:var(--mono);font-size:13px">
+    </div>
+    <div id="stockContainer" style="display:flex;flex-wrap:wrap;gap:6px;max-height:400px;overflow-y:auto">
+      {% for s in stocks %}
+      <span class="stock-tag" id="stock-{{ s.symbol }}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:var(--panel);font-size:12px;font-family:var(--mono)">
+        <a href="/stock/{{ s.symbol }}">{{ s.symbol }}</a>
+        <button onclick="removeStock('{{ s.symbol }}')" style="border:none;background:none;color:var(--red);cursor:pointer;font-size:14px;padding:0;line-height:1">&times;</button>
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- TAB: Circuit Data (circuit_breakout only) -->
+  {% if hypo.name == 'circuit_breakout' %}
+  <div id="tab-circuit" class="tab-content" style="display:none">
+    <!-- Stats Cards -->
+    <div class="grid grid-4" style="margin-bottom:20px">
+      <div class="card">
+        <div class="label">Circuit Records</div>
+        <div class="value" style="font-size:24px">{{ extra.circuit_count or 0 }}</div>
+        <div class="sub">across {{ extra.circuit_symbols or 0 }} stocks</div>
+      </div>
+      <div class="card">
+        <div class="label">Upper Hits</div>
+        <div class="value" style="font-size:24px;color:var(--green)">{{ extra.circuit_upper_hits or 0 }}</div>
+        <div class="sub">breakout candidates</div>
+      </div>
+      <div class="card">
+        <div class="label">Lower Hits</div>
+        <div class="value" style="font-size:24px;color:var(--red)">{{ extra.circuit_lower_hits or 0 }}</div>
+        <div class="sub">reversal candidates</div>
+      </div>
+      <div class="card">
+        <div class="label">Data Sources</div>
+        <div class="value" style="font-size:16px">{{ extra.circuit_sources or '--' }}</div>
+        <div class="sub">NSE / Upstox / Inferred</div>
+      </div>
+    </div>
+
+    <!-- Pattern Analysis -->
+    {% if extra.circuit_pattern_stats %}
+    <div class="card" style="margin-bottom:20px">
+      <div class="section-title">Circuit Breaker Pattern Analysis</div>
+      <div style="overflow-x:auto">
+        <table id="circuit-pattern-table">
+          <thead><tr><th>Pattern</th><th>Count</th><th>Avg 1D%</th><th>Win 1D%</th><th>Avg 5D%</th><th>Win 5D%</th><th>Avg 15D%</th><th>Win 15D%</th></tr></thead>
+          <tbody>
+            {% for key, val in extra.circuit_pattern_stats.items() %}
+            <tr>
+              <td class="mono" style="font-weight:bold">{{ key }}</td>
+              <td>{{ val.count or 0 }}</td>
+              <td class="{% if (val.get('avg_fwd_1d', 0) or 0) > 0 %}good{% elif (val.get('avg_fwd_1d', 0) or 0) < 0 %}bad{% endif %} mono">{{ "%+.1f"|format(val.get('avg_fwd_1d', 0) or 0) }}%</td>
+              <td class="mono">{{ "%.0f"|format(val.get('win_rate_1d', 0) or 0) }}%</td>
+              <td class="{% if (val.get('avg_fwd_5d', 0) or 0) > 0 %}good{% elif (val.get('avg_fwd_5d', 0) or 0) < 0 %}bad{% endif %} mono">{{ "%+.1f"|format(val.get('avg_fwd_5d', 0) or 0) }}%</td>
+              <td class="mono">{{ "%.0f"|format(val.get('win_rate_5d', 0) or 0) }}%</td>
+              <td class="{% if (val.get('avg_fwd_15d', 0) or 0) > 0 %}good{% elif (val.get('avg_fwd_15d', 0) or 0) < 0 %}bad{% endif %} mono">{{ "%+.1f"|format(val.get('avg_fwd_15d', 0) or 0) }}%</td>
+              <td class="mono">{{ "%.0f"|format(val.get('win_rate_15d', 0) or 0) }}%</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Recent Circuit Limits -->
+    <div class="card">
+      <div class="section-title">Recent Circuit Limits ({{ extra.circuit_limits | length }})</div>
+      <div style="max-height:500px;overflow-y:auto">
+        <table id="circuit-limits-table">
+          <thead>
+            <tr><th>Symbol</th><th>Date</th><th>Prev Close</th><th>Upper</th><th>Lower</th><th>Filter%</th><th>Source</th></tr>
+          </thead>
+          <tbody>
+            {% for cl in extra.circuit_limits %}
+            <tr>
+              <td class="mono" style="font-weight:bold"><a href="/stock/{{ cl.symbol }}">{{ cl.symbol }}</a></td>
+              <td class="mono" style="font-size:12px">{{ cl.trade_date }}</td>
+              <td class="mono">₹{{ "%.1f"|format(cl.prev_close) }}</td>
+              <td class="mono" style="color:var(--green)">₹{{ "%.1f"|format(cl.upper_circuit) }}</td>
+              <td class="mono" style="color:var(--red)">₹{{ "%.1f"|format(cl.lower_circuit) }}</td>
+              <td class="mono">{{ "%.0f"|format(cl.filter_pct) }}%</td>
+              <td><span class="badge {% if cl.source == 'nse_archive' %}badge-green{% elif cl.source == 'upstox_snapshot' %}badge-purple{% else %}badge-orange{% endif %}">{{ cl.source }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- TAB: Surveillance (surveillance_recovery only) -->
+  {% if hypo.name == 'surveillance_recovery' %}
+  <div id="tab-surveillance" class="tab-content" style="display:none">
+    <!-- Stats Cards -->
+    <div class="grid grid-6" style="margin-bottom:20px">
+      {% for fw in extra.surv_stats %}
+      <div class="card">
+        <div class="label">{{ fw[0] }}</div>
+        <div class="value" style="font-size:24px">{{ fw[1] }}</div>
+      </div>
+      {% endfor %}
+      <div class="card">
+        <div class="label">Signals</div>
+        <div class="value" style="font-size:24px">{{ extra.surv_full_signals | length }}</div>
+      </div>
+      <div class="card">
+        <div class="label">Paper Trades</div>
+        <div class="value" style="font-size:24px;color:var(--green)">{{ extra.surv_positions | length }}</div>
+      </div>
+    </div>
+
+    <!-- Paper Positions -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="section-title">Surveillance Positions ({{ extra.surv_positions | length }})</div>
+      <table>
+        <thead><tr><th>Symbol</th><th>Entry</th><th>Date</th><th>Horizon</th><th>Stop</th><th>Value</th></tr></thead>
+        <tbody>
+          {% for p in extra.surv_positions %}
+          <tr>
+            <td class="mono" style="color:var(--green);font-weight:bold"><a href="/stock/{{ p.symbol }}">{{ p.symbol }}</a></td>
+            <td class="mono">₹{{ "%.1f"|format(p.close_at_signal) }}</td>
+            <td class="mono" style="font-size:12px">{{ p.entry_date }}</td>
+            <td>{{ p.horizon_days }}d</td>
+            <td class="mono">{{ "%.0f"|format(p.stop_pct * 100) }}%</td>
+            <td class="mono">₹{{ "%.0f"|format(p.position_value or 0) }}</td>
+          </tr>
+          {% endfor %}
+          {% if not extra.surv_positions %}
+          <tr><td colspan="6" class="empty">No surveillance positions open</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Full Surveillance Signals -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="section-title">Top Surveillance Signals ({{ extra.surv_full_signals | length }})</div>
+      {% if extra.surv_full_signals %}
+      <table id="surv-signals-table">
+        <thead>
+          <tr><th>Symbol</th><th>Type</th><th>Strength</th><th>Framework</th><th>Stage</th><th>Price</th><th>1M%</th><th>3M%</th><th>Vol%</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          {% for s in extra.surv_full_signals %}
+          <tr>
+            <td class="mono" style="color:var(--green);font-weight:bold"><a href="/stock/{{ s.symbol }}">{{ s.symbol }}</a></td>
+            <td><span class="badge {% if 'recovery' in s.signal_type %}badge-green{% elif 'momentum' in s.signal_type %}badge-purple{% elif 'oversold' in s.signal_type %}badge-orange{% else %}badge-red{% endif %}">{{ s.signal_type }}</span></td>
+            <td class="mono">{{ "%.0f"|format(s.strength) }}</td>
+            <td>{{ s.framework }}</td>
+            <td>{{ s.stage }}</td>
+            <td class="mono">₹{{ "%.1f"|format(s.price or 0) }}</td>
+            <td class="{% if (s.ret_1m or 0) > 0 %}good{% elif (s.ret_1m or 0) < 0 %}bad{% endif %} mono">{{ "%+.1f"|format(s.ret_1m or 0) }}%</td>
+            <td class="{% if (s.ret_3m or 0) > 0 %}good{% elif (s.ret_3m or 0) < 0 %}bad{% endif %} mono">{{ "%+.1f"|format(s.ret_3m or 0) }}%</td>
+            <td class="mono">{{ "%.0f"|format(s.vol_20d or 0) }}%</td>
+            <td style="font-size:12px;color:var(--dim);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.notes or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">No surveillance signals yet</div>
+      {% endif %}
+    </div>
+
+    <!-- All Surveillance Stocks -->
+    <div class="card">
+      <div class="section-title">All Surveillance Stocks ({{ extra.surv_active_stocks | length }})</div>
+      <div style="max-height:500px;overflow-y:auto">
+        <table id="surv-active-table">
+          <thead>
+            <tr><th>Symbol</th><th>Framework</th><th>Stage</th><th>First Seen</th><th>IBC</th></tr>
+          </thead>
+          <tbody>
+            {% for s in extra.surv_active_stocks %}
+            <tr>
+              <td class="mono" style="font-weight:bold"><a href="/stock/{{ s.symbol }}">{{ s.symbol }}</a></td>
+              <td>{{ s.framework }}</td>
+              <td>{{ s.stage }}</td>
+              <td class="mono" style="font-size:12px">{{ s.first_seen_date }}</td>
+              <td>{% if s.has_ibc %}<span class="bad">Yes</span>{% else %}No{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.tab-btn {
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--mono);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all .15s;
+}
+.tab-btn:hover { color: var(--txt); }
+.tab-btn.active { color: var(--green); border-bottom-color: var(--green); }
+</style>
+
+<script>
+const HYPO_ID = {{ hypo.id }};
+
+function showTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  const tab = document.getElementById('tab-' + name);
+  if (tab) tab.style.display = '';
+  if (btn) btn.classList.add('active');
+}
+
+async function openTrade(e) {
+  e.preventDefault();
+  const f = e.target;
+  const data = new FormData(f);
+  const msg = document.getElementById('openMsg');
+  msg.textContent = 'Opening...';
+  msg.style.color = 'var(--dim)';
+  try {
+    const r = await fetch(`/api/hypothesis/${HYPO_ID}/trade/open`, { method: 'POST', body: data });
+    const j = await r.json();
+    if (j.status === 'ok') {
+      msg.textContent = `Opened ${j.symbol} (trade #${j.trade_id})`;
+      msg.style.color = 'var(--green)';
+      setTimeout(() => location.reload(), 800);
+    } else {
+      msg.textContent = 'Error: ' + JSON.stringify(j);
+      msg.style.color = 'var(--red)';
+    }
+  } catch(err) {
+    msg.textContent = 'Error: ' + err.message;
+    msg.style.color = 'var(--red)';
+  }
+  return false;
+}
+
+async function closeTrade(tradeId, symbol, entryPrice) {
+  const exitPrice = prompt(`Close ${symbol} trade #${tradeId}\nEntry: ₹${entryPrice}\nExit price:`);
+  if (!exitPrice) return;
+  const reason = prompt('Exit reason (STOP/TARGET/HORIZON/MANUAL):', 'MANUAL') || 'MANUAL';
+  const data = new FormData();
+  data.append('trade_id', tradeId);
+  data.append('exit_price', parseFloat(exitPrice));
+  data.append('exit_reason', reason);
+  try {
+    const r = await fetch(`/api/hypothesis/${HYPO_ID}/trade/close`, { method: 'POST', body: data });
+    const j = await r.json();
+    if (j.status === 'ok') {
+      alert(`Closed: net_bps=${j.result.net_bps?.toFixed(1) || '?'}`);
+      location.reload();
+    } else {
+      alert('Error: ' + JSON.stringify(j));
+    }
+  } catch(err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+async function addStock(e) {
+  e.preventDefault();
+  const f = e.target;
+  const data = new FormData(f);
+  const msg = document.getElementById('addMsg');
+  try {
+    const r = await fetch(`/api/hypothesis/${HYPO_ID}/add-stock`, { method: 'POST', body: data });
+    const j = await r.json();
+    if (j.status === 'ok') {
+      msg.textContent = `Added ${j.symbol}`;
+      msg.style.color = 'var(--green)';
+      setTimeout(() => location.reload(), 500);
+    } else {
+      msg.textContent = 'Error';
+      msg.style.color = 'var(--red)';
+    }
+  } catch(err) {
+    msg.textContent = err.message;
+    msg.style.color = 'var(--red)';
+  }
+  f.reset();
+  return false;
+}
+
+ async function removeStock(symbol) {
+   if (!confirm(`Remove ${symbol} from this hypothesis?`)) return;
+   const data = new FormData();
+   data.append('symbol', symbol);
+   try {
+     await fetch(`/api/hypothesis/${HYPO_ID}/remove-stock`, { method: 'POST', body: data });
+     const el = document.getElementById('stock-' + symbol);
+     if (el) el.style.display = 'none';
+   } catch(err) {
+     alert(err.message);
+   }
+ }
+
+ function filterStocks() {
+   const q = document.getElementById('stockSearch').value.toUpperCase();
+   document.querySelectorAll('#stockContainer .stock-tag').forEach(tag => {
+     const sym = tag.id.replace('stock-', '').toUpperCase();
+     tag.style.display = sym.includes(q) ? '' : 'none';
+   });
+ }
+
+// Equity Curve Chart
+const equityCtx = document.getElementById('equityChart');
+if (equityCtx) {
+  const eqDates = {{ equity_dates | tojson }};
+  const eqValues = {{ equity_values | tojson }};
+  new Chart(equityCtx, {
+    type: 'line',
+    data: {
+      labels: eqDates,
+      datasets: [{
+        label: 'Cumulative PnL (₹)',
+        data: eqValues,
+        borderColor: eqValues.length > 0 && eqValues[eqValues.length-1] >= 0 ? '#00e5a0' : '#ff6b81',
+        backgroundColor: eqValues.length > 0 && eqValues[eqValues.length-1] >= 0 ? 'rgba(0,229,160,0.1)' : 'rgba(255,107,129,0.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+        pointBackgroundColor: eqValues.map(v => v >= 0 ? '#00e5a0' : '#ff6b81'),
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => '₹' + ctx.parsed.y.toFixed(0) } }
+      },
+      scales: {
+        y: { grid: { color: 'rgba(28,42,66,0.5)' }, ticks: { color: '#7d90b5', callback: v => '₹' + v } },
+        x: { grid: { display: false }, ticks: { color: '#7d90b5', maxTicksLimit: 10 } }
+      }
+    }
+  });
+}
+</script>
+{% if hypo.name == 'surveillance_recovery' or hypo.name == 'circuit_breakout' %}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  {% if hypo.name == 'surveillance_recovery' %}
+  if (document.getElementById('surv-signals-table')) {
+    new DataTable('#surv-signals-table', { pageLength: 25, order: [[2, 'desc']], searching: true });
+  }
+  if (document.getElementById('surv-active-table')) {
+    new DataTable('#surv-active-table', { pageLength: 25, searching: true });
+  }
+  {% endif %}
+  {% if hypo.name == 'circuit_breakout' %}
+  if (document.getElementById('circuit-pattern-table')) {
+    new DataTable('#circuit-pattern-table', { pageLength: 20, order: [[1, 'desc']], searching: true });
+  }
+  if (document.getElementById('circuit-limits-table')) {
+    new DataTable('#circuit-limits-table', { pageLength: 25, order: [[1, 'desc']], searching: true });
+  }
+  {% endif %}
+});
+</script>
+{% endif %}
+{% endblock %}

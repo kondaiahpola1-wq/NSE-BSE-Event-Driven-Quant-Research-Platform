@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Surveillance Monitor{% endblock %}
+{% block nav_surveillance %}active{% endblock %}
+{% block content %}
+<h1>Surveillance Monitor</h1>
+<p style="color:var(--dim);margin-top:6px">ASM/GSM surveillance data from NSE India. Updated daily at 18:00 IST.</p>
+
+<!-- Stats Cards -->
+<div class="grid grid-6" style="margin-top:20px">
+  {% for stat in stats %}
+  <div class="card">
+    <div class="label">{{ stat[0] }}</div>
+    <div class="value" style="font-size:24px">{{ stat[1] }}</div>
+  </div>
+  {% endfor %}
+  <div class="card">
+    <div class="label">Signals</div>
+    <div class="value" style="font-size:24px">{{ signals|length }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Paper Trades</div>
+    <div class="value good" style="font-size:24px">{{ surv_positions|length }}</div>
+  </div>
+</div>
+
+<!-- Paper Positions -->
+<div class="card" style="margin-top:20px">
+  <div style="font-weight:bold;margin-bottom:12px;color:var(--purple)">Surveillance Positions ({{ surv_positions|length }})</div>
+  <table>
+    <thead><tr><th>Symbol</th><th>Entry</th><th>Date</th><th>Horizon</th><th>Stop</th><th>Value</th></tr></thead>
+    <tbody>
+      {% for p in surv_positions %}
+      <tr>
+        <td class="mono" style="color:var(--green);font-weight:bold">{{ p[0] }}</td>
+        <td class="mono">₹{{ "%.1f"|format(p[1]) }}</td>
+        <td class="mono" style="font-size:12px">{{ p[2] }}</td>
+        <td>{{ p[3] }}d</td>
+        <td class="mono">{{ "%.0f"|format(p[4]*100) }}%</td>
+        <td class="mono">₹{{ "%.0f"|format(p[6]) }}</td>
+      </tr>
+      {% endfor %}
+      {% if not surv_positions %}
+      <tr><td colspan="6" class="empty">No surveillance positions open</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Signals Table -->
+<div class="card" style="margin-top:20px">
+  <div style="font-weight:bold;margin-bottom:12px">Top Surveillance Signals</div>
+  <table id="signals-table">
+    <thead>
+      <tr>
+        <th>Symbol</th><th>Type</th><th>Strength</th><th>Framework</th>
+        <th>Stage</th><th>Price</th><th>1M%</th><th>3M%</th><th>Vol%</th><th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in signals %}
+      <tr>
+        <td class="mono" style="color:var(--green);font-weight:bold">{{ s[0] }}</td>
+        <td><span class="badge {% if 'recovery' in s[1] %}badge-green{% elif 'momentum' in s[1] %}badge-purple{% elif 'oversold' in s[1] %}badge-orange{% else %}badge-red{% endif %}">{{ s[1] }}</span></td>
+        <td class="mono">{{ "%.0f"|format(s[2]) }}</td>
+        <td>{{ s[3] }}</td>
+        <td>{{ s[4] }}</td>
+        <td class="mono">₹{{ "%.1f"|format(s[5] or 0) }}</td>
+        <td class="{% if (s[6] or 0) > 0 %}good{% elif (s[6] or 0) < 0 %}bad{% endif %} mono">{{ "%+.1f"|format(s[6] or 0) }}%</td>
+        <td class="{% if (s[7] or 0) > 0 %}good{% elif (s[7] or 0) < 0 %}bad{% endif %} mono">{{ "%+.1f"|format(s[7] or 0) }}%</td>
+        <td class="mono">{{ "%.0f"|format(s[8] or 0) }}%</td>
+        <td style="font-size:12px;color:var(--dim)">{{ s[9] or '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Active Stocks Table -->
+<div class="card" style="margin-top:20px">
+  <div style="font-weight:bold;margin-bottom:12px">All Surveillance Stocks ({{ active_stocks|length }})</div>
+  <div style="max-height:500px;overflow-y:auto">
+    <table id="active-table">
+      <thead>
+        <tr><th>Symbol</th><th>Framework</th><th>Stage</th><th>First Seen</th><th>IBC</th></tr>
+      </thead>
+      <tbody>
+        {% for s in active_stocks %}
+        <tr>
+          <td class="mono" style="font-weight:bold">{{ s[0] }}</td>
+          <td>{{ s[1] }}</td>
+          <td>{{ s[2] }}</td>
+          <td class="mono" style="font-size:12px">{{ s[4] }}</td>
+          <td>{% if s[5] %}<span class="bad">Yes</span>{% else %}No{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+new DataTable('#signals-table', { pageLength: 25, order: [[2, 'desc']] });
+new DataTable('#active-table', { pageLength: 25 });
+</script>
+{% endblock %}

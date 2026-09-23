@@ -7,7 +7,7 @@ SEBI definitions (2024):
     Micro Cap:  < ₹500 Cr
     SME:        NSE SME segment stocks (segment="SME") — overrides value-based class
 
-Uses router fallback cascade: FinStack → Indian Market MCP → Free MCP → yfinance.
+Uses router fallback cascade: FinStack → Indian Market MCP → Free MCP → InvestorFeed → yfinance.
 """
 
 from __future__ import annotations
@@ -44,6 +44,43 @@ def save_mcap_cache(data: dict[str, dict]) -> None:
     MCAP_FILE.write_text(json.dumps(data, indent=1, default=str))
 
 
+def refresh_cache_from_investorfeed() -> int:
+    """Pre-populate market cap cache from InvestorFeed API.
+
+    Fetches all ~5,100 company profiles and adds them to the disk cache.
+    Returns number of companies added.
+    """
+    try:
+        from indian_quant.ingestion.web.investorfeed_client import InvestorFeedClient
+        client = InvestorFeedClient(use_cache=True)
+        profiles = client.fetch_all_profiles()
+
+        cache = load_mcap_cache()
+        added = 0
+
+        for symbol, profile in profiles.items():
+            mcap_cr = profile.get("mcap_cr")
+            if mcap_cr is not None:
+                mcap_cr = float(mcap_cr)
+
+            # Add under both NSE and BSE keys
+            for exchange in ["NSE", "BSE"]:
+                key = f"{exchange}|{symbol}"
+                if key not in cache or cache[key].get("market_cap_cr") is None:
+                    cache[key] = {
+                        "market_cap_cr": mcap_cr,
+                        "market_cap_class": classify_by_value(mcap_cr),
+                    }
+                    added += 1
+
+        save_mcap_cache(cache)
+        logger.info("Refreshed cache from InvestorFeed: %d companies added", added)
+        return added
+    except Exception as e:
+        logger.error("Failed to refresh cache from InvestorFeed: %s", e)
+        return 0
+
+
 def classify_by_value(mcap_cr: float | None) -> str:
     """Classify market cap tier from value in ₹ Cr."""
     if mcap_cr is None:
@@ -73,6 +110,7 @@ def get_market_cap(router: Any, symbol: str, exchange: str = "NSE",
                    cache: dict[str, dict] | None = None) -> dict[str, Any]:
     """Fetch market cap for a symbol via router, with optional disk cache.
 
+    Cascade: cache → router → InvestorFeed API → Unknown.
     Returns dict with keys: market_cap_cr, market_cap_class.
     """
     key = f"{exchange}|{symbol}"
@@ -97,6 +135,10 @@ def get_market_cap(router: Any, symbol: str, exchange: str = "NSE",
             if raw:
                 mcap_cr = round(float(raw) / 1e7, 2)
 
+    # Fallback: InvestorFeed API (covers ~5,100 companies)
+    if mcap_cr is None:
+        mcap_cr = _get_market_cap_from_investorfeed(symbol)
+
     result = {
         "market_cap_cr": mcap_cr,
         "market_cap_class": classify_by_value(mcap_cr),
@@ -109,14 +151,36 @@ def get_market_cap(router: Any, symbol: str, exchange: str = "NSE",
     return result
 
 
+def _get_market_cap_from_investorfeed(symbol: str) -> float | None:
+    """Fallback: fetch market cap from InvestorFeed API."""
+    try:
+        from indian_quant.ingestion.web.investorfeed_client import InvestorFeedClient
+        client = InvestorFeedClient(use_cache=True)
+        profile = client.get_single_profile(symbol)
+        if profile and profile.get("mcap_cr") is not None:
+            return float(profile["mcap_cr"])
+    except Exception as e:
+        logger.debug("InvestorFeed fallback failed for %s: %s", symbol, e)
+    return None
+
+
 def classify_signals(signals: list[dict], router: Any | None = None) -> list[dict]:
     """Add market cap classification to all signals.
 
-    Uses disk cache for speed. Only calls router for cache misses.
+    Uses disk cache (pre-populated from InvestorFeed + previous runs).
+    Only calls router for cache misses when no disk cache exists.
     SME-segment stocks get market_cap_class="SME" overriding value-based class.
     """
     cache = load_mcap_cache()
     has_cache = len(cache) > 0
+
+    # Auto-refresh from InvestorFeed if cache is empty or stale
+    if not has_cache:
+        print("Market cap cache empty, refreshing from InvestorFeed...")
+        refresh_cache_from_investorfeed()
+        cache = load_mcap_cache()
+        has_cache = len(cache) > 0
+
     fetched = 0
     cache_hits = 0
     cache_misses = 0

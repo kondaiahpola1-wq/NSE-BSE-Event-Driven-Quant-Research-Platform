@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import sqlalchemy as sa
 
 
 def _sanitize(obj):
@@ -21,32 +21,36 @@ def _settings():
     return load_settings()
 
 
+def _pg_engine():
+    from indian_quant.config.connections import get_engine
+    return get_engine()
+
+
 def get_paper_summary() -> dict[str, Any]:
-    settings = _settings()
-    db = Path(settings.storage.metadata_dsn.removeprefix("sqlite:///"))
-    if not db.exists():
-        return {"open": 0, "settled": 0, "avg_net_bps": None, "hit_rate": None}
-    con = sqlite3.connect(str(db))
-    settled = con.execute(
-        """SELECT COUNT(*), AVG(realized_net_bps),
-           SUM(realized_net_bps>0)*1.0/COUNT(*) FROM paper_signals WHERE status='SETTLED'"""
-    ).fetchone()
-    open_n = con.execute(
-        "SELECT COUNT(*) FROM paper_signals WHERE status='OPEN'"
-    ).fetchone()[0]
-    cursor = con.execute("SELECT * FROM paper_signals WHERE status='OPEN' ORDER BY created_at DESC")
-    cols = [d[0] for d in cursor.description]
-    open_rows = []
-    for row in cursor.fetchall():
-        entry = {}
-        for col, val in zip(cols, row, strict=False):
-            if isinstance(val, bytes):
-                val = val.decode()
-            elif not isinstance(val, (int, float, str, bool, type(None))):
-                val = str(val)
-            entry[col] = val
-        open_rows.append(entry)
-    con.close()
+    engine = _pg_engine()
+    with engine.connect() as conn:
+        settled = conn.execute(sa.text("""
+            SELECT COUNT(*), AVG(realized_net_bps),
+                   SUM(CASE WHEN realized_net_bps > 0 THEN 1 ELSE 0 END)*1.0/COUNT(*)
+            FROM paper_signals WHERE status='SETTLED'
+        """)).fetchone()
+        open_n = conn.execute(sa.text(
+            "SELECT COUNT(*) FROM paper_signals WHERE status='OPEN'"
+        )).fetchone()[0]
+        cursor = conn.execute(sa.text(
+            "SELECT * FROM paper_signals WHERE status='OPEN' ORDER BY created_at DESC"
+        ))
+        cols = cursor.keys()
+        open_rows = []
+        for row in cursor.fetchall():
+            entry = {}
+            for col, val in zip(cols, row, strict=False):
+                if isinstance(val, bytes):
+                    val = val.decode()
+                elif not isinstance(val, (int, float, str, bool, type(None))):
+                    val = str(val)
+                entry[col] = val
+            open_rows.append(entry)
     result = {
         "open": int(open_n),
         "settled": int(settled[0]) if settled[0] else 0,
@@ -54,6 +58,26 @@ def get_paper_summary() -> dict[str, Any]:
         "hit_rate": float(round(settled[2], 3)) if settled[2] is not None else None,
         "open_positions": open_rows,
     }
+    # Add by_horizon breakdown
+    with engine.connect() as conn:
+        hz_rows = conn.execute(sa.text("""
+            SELECT horizon_label as label,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN status='SETTLED' THEN 1 ELSE 0 END) as settled,
+                   SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) as open_n,
+                   AVG(CASE WHEN status='SETTLED' THEN realized_net_bps END) as avg_net_bps,
+                   AVG(CASE WHEN status='SETTLED' AND realized_net_bps > 0 THEN 1.0 ELSE 0.0 END) as hit_rate
+            FROM paper_signals
+            WHERE horizon_label IS NOT NULL
+            GROUP BY horizon_label
+            ORDER BY horizon_label
+        """)).fetchall()
+        result["by_horizon"] = [
+            {"label": r[0], "total": int(r[1] or 0), "settled": int(r[2] or 0),
+             "open": int(r[3] or 0), "avg_net_bps": round(float(r[4]), 1) if r[4] is not None else None,
+             "hit_rate": round(float(r[5]), 3) if r[5] is not None else None}
+            for r in hz_rows
+        ]
     return _sanitize(result)
 
 

@@ -28,23 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("ingest_institutional")
 
 
-def _safe_float(val, default=None):
-    if val is None:
-        return default
-    try:
-        v = float(val)
-        return v if v == v else default
-    except (ValueError, TypeError):
-        return default
-
-
-def _safe_int(val, default=None):
-    if val is None:
-        return default
-    try:
-        return int(float(str(val).replace(",", "")))
-    except (ValueError, TypeError):
-        return default
+from indian_quant.utils import safe_float as _safe_float, safe_int as _safe_int
 
 
 # ── FII/DII Daily Flows ──

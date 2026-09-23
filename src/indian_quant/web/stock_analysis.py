@@ -67,20 +67,17 @@ def get_stock_analysis(symbol: str, user_id: int | None = None) -> dict[str, Any
     deliv_dates = [str(d.date()) if hasattr(d, "date") else str(d)[:10]
                    for d in pd.to_datetime(deliv_tail["date"])]
 
-    # Recent suggestions
+    # Recent suggestions (from PostgreSQL)
     recent_suggestions = []
     try:
-        import sqlite3 as _sq
-        db = Path(settings.storage.metadata_dsn.removeprefix("sqlite:///"))
-        if db.exists():
-            con = _sq.connect(str(db))
-            con.row_factory = _sq.Row
-            rows = con.execute(
-                "SELECT * FROM daily_suggestions WHERE symbol = ? ORDER BY suggestion_date DESC LIMIT 10",
-                (symbol.upper(),),
-            ).fetchall()
+        from indian_quant.web.prod_config import get_pg_engine
+        import sqlalchemy as sa
+        pg = get_pg_engine()
+        with pg.connect() as conn:
+            rows = conn.execute(sa.text(
+                "SELECT * FROM daily_suggestions WHERE symbol = :sym ORDER BY suggestion_date DESC LIMIT 10"
+            ), {"sym": symbol.upper()}).mappings().fetchall()
             recent_suggestions = [dict(r) for r in rows]
-            con.close()
     except Exception:
         pass
 

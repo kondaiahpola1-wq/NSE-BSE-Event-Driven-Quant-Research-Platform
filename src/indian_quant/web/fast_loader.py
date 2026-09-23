@@ -20,7 +20,7 @@ from typing import Any
 import pandas as pd
 
 from indian_quant.web.prod_config import (
-    ensure_pg_schema,
+    ensure_schema,
     get_pg_engine,
     get_redis_client,
 )
@@ -74,7 +74,7 @@ def get_latest_signals_cached() -> dict[str, Any]:
     # 2) Fallback to PostgreSQL
     try:
         engine = get_pg_engine()
-        ensure_pg_schema()
+        ensure_schema()
         df = pd.read_sql("SELECT * FROM cached_signals", engine)
         if not df.empty:
             # Warm Redis for next time
